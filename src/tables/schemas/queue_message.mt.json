@@ -1,0 +1,21 @@
+{
+  "namespace": "qu::tables",
+  "table_name": "queue_messages",
+  "class_name": "QueueMessageRow",
+  "key": "id",
+  "schema_version": 1,
+  "fields": [
+    {"name": "id", "type": "string", "required": true},
+    {"name": "status", "type": "string", "required": true},
+    {"name": "payload", "type": "json", "default": {}},
+    {"name": "workerId", "type": "optional", "value_type": "string"},
+    {"name": "createdAtMs", "type": "int64", "required": true},
+    {"name": "claimedAtMs", "type": "optional", "value_type": "int64"},
+    {"name": "claimedUntilMs", "type": "optional", "value_type": "int64"},
+    {"name": "processedAtMs", "type": "optional", "value_type": "int64"},
+    {"name": "attempt", "type": "int64", "default": 0}
+  ],
+  "indexes": [
+    {"name": "idx_queue_message_status", "path": "$.status"}
+  ]
+}
