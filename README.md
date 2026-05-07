@@ -1,3 +1,4 @@
+![qu logo and project overview](images/qu.png)
 # qu
 
 `qu` is a C++20 transactional queue library built on the sibling `mt` library.
