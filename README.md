@@ -80,6 +80,120 @@ The memory backend is process-local and non-durable. It is used here for tests a
 development. Durable deployments should wire the same queue service to a durable `mt`
 backend once the target backend is selected.
 
+## Backend Examples
+
+`qu::Queue` is backend-neutral: construct any `mt::IDatabaseBackend`, wrap it in an
+`mt::Database`, then pass that database to the queue.
+
+The queue operations are the same for each backend:
+
+```cpp
+#include "qu/queue.hpp"
+
+#include "mt/database.hpp"
+#include "mt/json.hpp"
+
+#include <cstdint>
+#include <iostream>
+
+void run_queue(mt::Database& database)
+{
+    qu::Queue queue{
+        database,
+        qu::QueueConfig{.visibility_timeout_ms = 30000}
+    };
+
+    const std::int64_t now_ms = 1710000000000;
+
+    queue.enqueue(
+        "message:1",
+        mt::Json::object({
+            {"type", "send-email"},
+            {"to", "alice@example.com"}
+        }),
+        now_ms
+    );
+
+    auto claimed = queue.claim_next("worker:1", now_ms + 100);
+    if (!claimed)
+    {
+        return;
+    }
+
+    // Process claimed->payload here.
+    std::cout << "processing " << claimed->id << "\n";
+
+    queue.ack(claimed->id, claimed->worker_id, now_ms + 250);
+}
+```
+
+### Memory
+
+The memory backend is header-only and is the simplest option for tests and local
+experiments. Data is process-local and is lost when the backend instance is destroyed.
+
+```cpp
+#include "mt/backends/memory.hpp"
+
+#include <memory>
+
+int main()
+{
+    auto backend = std::make_shared<mt::backends::memory::MemoryBackend>();
+    mt::Database database{backend};
+
+    run_queue(database);
+}
+```
+
+### SQLite
+
+The SQLite backend persists queue state to a local SQLite database file.
+
+```cpp
+#include "mt/backends/sqlite.hpp"
+
+#include <memory>
+
+int main()
+{
+    auto backend =
+        std::make_shared<mt::backends::sqlite::SqliteBackend>("qu.sqlite");
+    mt::Database database{backend};
+
+    run_queue(database);
+}
+```
+
+SQLite is an optional `mt` backend. When building an application that uses it, include
+the `mt` SQLite backend implementation sources and link against SQLite, for example via
+`pkg-config --cflags --libs sqlite3`.
+
+### PostgreSQL
+
+The PostgreSQL backend persists queue state to a PostgreSQL database using a libpq
+connection string.
+
+```cpp
+#include "mt/backends/postgres.hpp"
+
+#include <memory>
+
+int main()
+{
+    auto backend = std::make_shared<mt::backends::postgres::PostgresBackend>(
+        "postgresql://qu_user:qu_password@localhost:5432/qu"
+    );
+    mt::Database database{backend};
+
+    run_queue(database);
+}
+```
+
+PostgreSQL is an optional `mt` backend. When building an application that uses it,
+include the `mt` PostgreSQL backend implementation sources and link against libpq, for
+example via `pkg-config --cflags --libs libpq`.
+
 ## Build And Test
 
 ```sh
@@ -100,7 +214,7 @@ make clean
 
 - batch claim
 - dead-letter policy
-- durable backend examples
+- durable backend demo programs
 - idempotent delivery result table
 - command-line demo tool
 - metrics and operational examples
