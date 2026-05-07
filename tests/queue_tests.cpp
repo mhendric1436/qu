@@ -147,3 +147,49 @@ TEST_CASE("non-expired claims are not reaped")
     REQUIRE(message.has_value());
     CHECK(message->status == qu::MessageStatus::Claimed);
 }
+
+TEST_CASE("queue operations can use caller-owned transactions")
+{
+    TestContext ctx;
+    mt::TransactionProvider txs{ctx.database};
+
+    txs.run(
+        [&](mt::Transaction& tx)
+        {
+            ctx.queue.enqueue(tx, "msg-1", mt::Json::object({{"kind", "created"}}), 1000);
+
+            auto pending = ctx.queue.get(tx, "msg-1");
+            REQUIRE(pending.has_value());
+            CHECK(pending->status == qu::MessageStatus::Pending);
+
+            auto claimed = ctx.queue.claim_next(tx, "worker-1", 1100);
+            REQUIRE(claimed.has_value());
+            CHECK(claimed->id == "msg-1");
+
+            ctx.queue.ack(tx, claimed->id, claimed->worker_id, 1200);
+
+            auto processed = ctx.queue.get(tx, "msg-1");
+            REQUIRE(processed.has_value());
+            CHECK(processed->status == qu::MessageStatus::Processed);
+        }
+    );
+
+    auto stored = ctx.queue.get("msg-1");
+    REQUIRE(stored.has_value());
+    CHECK(stored->status == qu::MessageStatus::Processed);
+}
+
+TEST_CASE("reap_expired can use a caller-owned transaction")
+{
+    TestContext ctx;
+    ctx.queue.enqueue("msg-1", mt::Json::object({}), 1000);
+    REQUIRE(ctx.queue.claim_next("worker-1", 1100).has_value());
+
+    mt::TransactionProvider txs{ctx.database};
+    auto reaped = txs.run([&](mt::Transaction& tx) { return ctx.queue.reap_expired(tx, 1200); });
+
+    CHECK(reaped == 1);
+    auto stored = ctx.queue.get("msg-1");
+    REQUIRE(stored.has_value());
+    CHECK(stored->status == qu::MessageStatus::Pending);
+}

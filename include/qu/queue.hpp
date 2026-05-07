@@ -2,6 +2,7 @@
 
 #include "mt/database.hpp"
 #include "mt/json.hpp"
+#include "mt/transaction.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -77,7 +78,20 @@ class Queue
         std::int64_t now_ms
     ) const;
 
+    void enqueue(
+        mt::Transaction& tx,
+        std::string id,
+        mt::Json payload,
+        std::int64_t now_ms
+    ) const;
+
     std::optional<ClaimedMessage> claim_next(
+        std::string worker_id,
+        std::int64_t now_ms
+    ) const;
+
+    std::optional<ClaimedMessage> claim_next(
+        mt::Transaction& tx,
         std::string worker_id,
         std::int64_t now_ms
     ) const;
@@ -87,14 +101,35 @@ class Queue
         std::string worker_id,
         std::int64_t now_ms) const;
 
+    void
+    ack(mt::Transaction& tx,
+        std::string id,
+        std::string worker_id,
+        std::int64_t now_ms) const;
+
     void fail(
+        std::string id,
+        std::string worker_id
+    ) const;
+
+    void fail(
+        mt::Transaction& tx,
         std::string id,
         std::string worker_id
     ) const;
 
     std::size_t reap_expired(std::int64_t now_ms) const;
 
+    std::size_t reap_expired(
+        mt::Transaction& tx,
+        std::int64_t now_ms
+    ) const;
+
     std::optional<QueuedMessage> get(const std::string& id) const;
+
+    std::optional<QueuedMessage>
+    get(mt::Transaction& tx,
+        const std::string& id) const;
 
   private:
     mt::Database* database_ = nullptr;

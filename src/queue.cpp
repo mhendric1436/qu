@@ -135,26 +135,32 @@ void Queue::enqueue(
     std::int64_t now_ms
 ) const
 {
-    auto messages = queue_table(*database_);
     mt::TransactionProvider txs{*database_};
 
-    txs.run(
-        [&](mt::Transaction& tx)
-        {
-            if (messages.get(tx, id))
-            {
-                throw DuplicateMessage(id);
-            }
+    txs.run([&](mt::Transaction& tx) { enqueue(tx, std::move(id), std::move(payload), now_ms); });
+}
 
-            messages.put(
-                tx, tables::QueueMessageRow{
-                        .id = std::move(id),
-                        .status = status_to_string(MessageStatus::Pending),
-                        .payload = std::move(payload),
-                        .createdAtMs = now_ms
-                    }
-            );
-        }
+void Queue::enqueue(
+    mt::Transaction& tx,
+    std::string id,
+    mt::Json payload,
+    std::int64_t now_ms
+) const
+{
+    auto messages = queue_table(*database_);
+
+    if (messages.get(tx, id))
+    {
+        throw DuplicateMessage(id);
+    }
+
+    messages.put(
+        tx, tables::QueueMessageRow{
+                .id = std::move(id),
+                .status = status_to_string(MessageStatus::Pending),
+                .payload = std::move(payload),
+                .createdAtMs = now_ms
+            }
     );
 }
 
@@ -163,35 +169,42 @@ std::optional<ClaimedMessage> Queue::claim_next(
     std::int64_t now_ms
 ) const
 {
-    auto messages = queue_table(*database_);
     mt::TransactionProvider txs{*database_};
 
     return txs.run(
         [&](mt::Transaction& tx) -> std::optional<ClaimedMessage>
-        {
-            auto query = mt::QuerySpec::where_json_eq(
-                "$.status", mt::Json(status_to_string(MessageStatus::Pending))
-            );
-            query.limit = std::size_t{1};
-
-            auto pending = messages.query(tx, query);
-            if (pending.empty())
-            {
-                return std::nullopt;
-            }
-
-            auto row = std::move(pending.front());
-            row.status = status_to_string(MessageStatus::Claimed);
-            row.workerId = worker_id;
-            row.claimedAtMs = now_ms;
-            row.claimedUntilMs = now_ms + config_.visibility_timeout_ms;
-            row.processedAtMs = std::nullopt;
-            row.attempt += 1;
-            messages.put(tx, row);
-
-            return to_claimed_message(row);
-        }
+        { return claim_next(tx, std::move(worker_id), now_ms); }
     );
+}
+
+std::optional<ClaimedMessage> Queue::claim_next(
+    mt::Transaction& tx,
+    std::string worker_id,
+    std::int64_t now_ms
+) const
+{
+    auto messages = queue_table(*database_);
+    auto query = mt::QuerySpec::where_json_eq(
+        "$.status", mt::Json(status_to_string(MessageStatus::Pending))
+    );
+    query.limit = std::size_t{1};
+
+    auto pending = messages.query(tx, query);
+    if (pending.empty())
+    {
+        return std::nullopt;
+    }
+
+    auto row = std::move(pending.front());
+    row.status = status_to_string(MessageStatus::Claimed);
+    row.workerId = std::move(worker_id);
+    row.claimedAtMs = now_ms;
+    row.claimedUntilMs = now_ms + config_.visibility_timeout_ms;
+    row.processedAtMs = std::nullopt;
+    row.attempt += 1;
+    messages.put(tx, row);
+
+    return to_claimed_message(row);
 }
 
 void Queue::ack(
@@ -200,22 +213,27 @@ void Queue::ack(
     std::int64_t now_ms
 ) const
 {
-    auto messages = queue_table(*database_);
     mt::TransactionProvider txs{*database_};
 
-    txs.run(
-        [&](mt::Transaction& tx)
-        {
-            auto row = messages.require(tx, id);
-            require_claimed_by(row, worker_id);
+    txs.run([&](mt::Transaction& tx) { ack(tx, std::move(id), std::move(worker_id), now_ms); });
+}
 
-            row.status = status_to_string(MessageStatus::Processed);
-            row.processedAtMs = now_ms;
-            row.claimedAtMs = std::nullopt;
-            row.claimedUntilMs = std::nullopt;
-            messages.put(tx, row);
-        }
-    );
+void Queue::ack(
+    mt::Transaction& tx,
+    std::string id,
+    std::string worker_id,
+    std::int64_t now_ms
+) const
+{
+    auto messages = queue_table(*database_);
+    auto row = messages.require(tx, id);
+    require_claimed_by(row, worker_id);
+
+    row.status = status_to_string(MessageStatus::Processed);
+    row.processedAtMs = now_ms;
+    row.claimedAtMs = std::nullopt;
+    row.claimedUntilMs = std::nullopt;
+    messages.put(tx, row);
 }
 
 void Queue::fail(
@@ -223,63 +241,84 @@ void Queue::fail(
     std::string worker_id
 ) const
 {
-    auto messages = queue_table(*database_);
     mt::TransactionProvider txs{*database_};
 
-    txs.run(
-        [&](mt::Transaction& tx)
-        {
-            auto row = messages.require(tx, id);
-            require_claimed_by(row, worker_id);
+    txs.run([&](mt::Transaction& tx) { fail(tx, std::move(id), std::move(worker_id)); });
+}
 
-            row.status = status_to_string(MessageStatus::Pending);
-            row.workerId = std::nullopt;
-            row.claimedAtMs = std::nullopt;
-            row.claimedUntilMs = std::nullopt;
-            messages.put(tx, row);
-        }
-    );
+void Queue::fail(
+    mt::Transaction& tx,
+    std::string id,
+    std::string worker_id
+) const
+{
+    auto messages = queue_table(*database_);
+    auto row = messages.require(tx, id);
+    require_claimed_by(row, worker_id);
+
+    row.status = status_to_string(MessageStatus::Pending);
+    row.workerId = std::nullopt;
+    row.claimedAtMs = std::nullopt;
+    row.claimedUntilMs = std::nullopt;
+    messages.put(tx, row);
 }
 
 std::size_t Queue::reap_expired(std::int64_t now_ms) const
 {
-    auto messages = queue_table(*database_);
     mt::TransactionProvider txs{*database_};
 
-    return txs.run(
-        [&](mt::Transaction& tx) -> std::size_t
-        {
-            auto claimed = messages.query(
-                tx, mt::QuerySpec::where_json_eq(
-                        "$.status", mt::Json(status_to_string(MessageStatus::Claimed))
-                    )
-            );
+    return txs.run([&](mt::Transaction& tx) -> std::size_t { return reap_expired(tx, now_ms); });
+}
 
-            std::size_t reaped = 0;
-            for (auto& row : claimed)
-            {
-                if (!row.claimedUntilMs || *row.claimedUntilMs > now_ms)
-                {
-                    continue;
-                }
-
-                row.status = status_to_string(MessageStatus::Pending);
-                row.workerId = std::nullopt;
-                row.claimedAtMs = std::nullopt;
-                row.claimedUntilMs = std::nullopt;
-                messages.put(tx, row);
-                ++reaped;
-            }
-
-            return reaped;
-        }
+std::size_t Queue::reap_expired(
+    mt::Transaction& tx,
+    std::int64_t now_ms
+) const
+{
+    auto messages = queue_table(*database_);
+    auto claimed = messages.query(
+        tx,
+        mt::QuerySpec::where_json_eq("$.status", mt::Json(status_to_string(MessageStatus::Claimed)))
     );
+
+    std::size_t reaped = 0;
+    for (auto& row : claimed)
+    {
+        if (!row.claimedUntilMs || *row.claimedUntilMs > now_ms)
+        {
+            continue;
+        }
+
+        row.status = status_to_string(MessageStatus::Pending);
+        row.workerId = std::nullopt;
+        row.claimedAtMs = std::nullopt;
+        row.claimedUntilMs = std::nullopt;
+        messages.put(tx, row);
+        ++reaped;
+    }
+
+    return reaped;
 }
 
 std::optional<QueuedMessage> Queue::get(const std::string& id) const
 {
     auto messages = queue_table(*database_);
     auto row = messages.get(id);
+    if (!row)
+    {
+        return std::nullopt;
+    }
+
+    return to_public_message(*row);
+}
+
+std::optional<QueuedMessage> Queue::get(
+    mt::Transaction& tx,
+    const std::string& id
+) const
+{
+    auto messages = queue_table(*database_);
+    auto row = messages.get(tx, id);
     if (!row)
     {
         return std::nullopt;
