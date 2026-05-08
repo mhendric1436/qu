@@ -12,7 +12,9 @@ package "qu" {
     component "Queue operations\nsrc/queue.cpp" as ops
     component "Namespace + channel scope" as scope
     component "QueueMessageRowMapping\nsrc/tables/generated" as mapping
+    component "QueueChannelCounterRowMapping\nsrc/tables/generated" as counterMapping
     artifact "queue_message.mt.json\nschema metadata" as schema
+    artifact "queue_channel_counter.mt.json\ncounter metadata" as counterSchema
 }
 
 package "wf" {
@@ -26,6 +28,7 @@ package "mt" {
     component "mt::Transaction" as tx
     component "mt::TableProvider" as tables
     component "mt::Table<QueueMessageRow>" as table
+    component "mt::Table<QueueChannelCounterRow>" as counterTable
     interface "mt::IDatabaseBackend" as backend
 }
 
@@ -53,9 +56,13 @@ orchestrator --> tx : transaction overloads
 
 ops --> tables
 tables --> table
+tables --> counterTable
 table --> mapping
+counterTable --> counterMapping
 mapping --> schema
+counterMapping --> counterSchema
 table --> tx : staged reads and writes
+counterTable --> tx : allocate next sequence
 orchestrator --> workflowTables
 workflowTables --> tx : staged reads and writes
 
@@ -73,6 +80,9 @@ claimed -> pending on fail or lease reap
 
 Message identity:
 namespace + channel + message id
+
+FIFO ordering:
+namespace/channel counter -> message sequence
 end note
 
 @enduml
