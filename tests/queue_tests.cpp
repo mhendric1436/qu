@@ -50,19 +50,19 @@ TEST_CASE("claim transitions one pending message to claimed")
     TestContext ctx;
     ctx.queue.enqueue("msg-1", mt::Json::object({{"kind", "created"}}), 1000);
 
-    auto claimed = ctx.queue.claim_next("worker-1", 1100);
+    auto claimed = ctx.queue.claim_next("consumer-1", 1100);
 
     REQUIRE(claimed.has_value());
     CHECK(claimed->id == "msg-1");
-    CHECK(claimed->worker_id == "worker-1");
+    CHECK(claimed->consumer_id == "consumer-1");
     CHECK(claimed->claimed_until_ms == 1200);
     CHECK(claimed->attempt == 1);
 
     auto stored = ctx.queue.get("msg-1");
     REQUIRE(stored.has_value());
     CHECK(stored->status == qu::MessageStatus::Claimed);
-    REQUIRE(stored->worker_id.has_value());
-    CHECK(*stored->worker_id == "worker-1");
+    REQUIRE(stored->consumer_id.has_value());
+    CHECK(*stored->consumer_id == "consumer-1");
 }
 
 TEST_CASE("two consumers do not claim the same pending message")
@@ -70,8 +70,8 @@ TEST_CASE("two consumers do not claim the same pending message")
     TestContext ctx;
     ctx.queue.enqueue("msg-1", mt::Json::object({}), 1000);
 
-    auto first = ctx.queue.claim_next("worker-1", 1100);
-    auto second = ctx.queue.claim_next("worker-2", 1101);
+    auto first = ctx.queue.claim_next("consumer-1", 1100);
+    auto second = ctx.queue.claim_next("consumer-2", 1101);
 
     REQUIRE(first.has_value());
     CHECK_FALSE(second.has_value());
@@ -81,43 +81,43 @@ TEST_CASE("ack marks a claimed message as processed")
 {
     TestContext ctx;
     ctx.queue.enqueue("msg-1", mt::Json::object({}), 1000);
-    REQUIRE(ctx.queue.claim_next("worker-1", 1100).has_value());
+    REQUIRE(ctx.queue.claim_next("consumer-1", 1100).has_value());
 
-    ctx.queue.ack("msg-1", "worker-1", 1150);
+    ctx.queue.ack("msg-1", "consumer-1", 1150);
 
     auto message = ctx.queue.get("msg-1");
     REQUIRE(message.has_value());
     CHECK(message->status == qu::MessageStatus::Processed);
-    REQUIRE(message->worker_id.has_value());
-    CHECK(*message->worker_id == "worker-1");
+    REQUIRE(message->consumer_id.has_value());
+    CHECK(*message->consumer_id == "consumer-1");
     REQUIRE(message->processed_at_ms.has_value());
     CHECK(*message->processed_at_ms == 1150);
 }
 
-TEST_CASE("ack by another worker is rejected")
+TEST_CASE("ack by another consumer is rejected")
 {
     TestContext ctx;
     ctx.queue.enqueue("msg-1", mt::Json::object({}), 1000);
-    REQUIRE(ctx.queue.claim_next("worker-1", 1100).has_value());
+    REQUIRE(ctx.queue.claim_next("consumer-1", 1100).has_value());
 
-    CHECK_THROWS_AS(ctx.queue.ack("msg-1", "worker-2", 1150), qu::InvalidMessageState);
+    CHECK_THROWS_AS(ctx.queue.ack("msg-1", "consumer-2", 1150), qu::InvalidMessageState);
 }
 
 TEST_CASE("fail returns a claimed message to pending")
 {
     TestContext ctx;
     ctx.queue.enqueue("msg-1", mt::Json::object({}), 1000);
-    REQUIRE(ctx.queue.claim_next("worker-1", 1100).has_value());
+    REQUIRE(ctx.queue.claim_next("consumer-1", 1100).has_value());
 
-    ctx.queue.fail("msg-1", "worker-1");
+    ctx.queue.fail("msg-1", "consumer-1");
 
     auto message = ctx.queue.get("msg-1");
     REQUIRE(message.has_value());
     CHECK(message->status == qu::MessageStatus::Pending);
-    CHECK_FALSE(message->worker_id.has_value());
+    CHECK_FALSE(message->consumer_id.has_value());
     CHECK_FALSE(message->claimed_until_ms.has_value());
 
-    auto reclaimed = ctx.queue.claim_next("worker-2", 1200);
+    auto reclaimed = ctx.queue.claim_next("consumer-2", 1200);
     REQUIRE(reclaimed.has_value());
     CHECK(reclaimed->attempt == 2);
 }
@@ -126,21 +126,21 @@ TEST_CASE("expired claims are reaped back to pending")
 {
     TestContext ctx;
     ctx.queue.enqueue("msg-1", mt::Json::object({}), 1000);
-    REQUIRE(ctx.queue.claim_next("worker-1", 1100).has_value());
+    REQUIRE(ctx.queue.claim_next("consumer-1", 1100).has_value());
 
     CHECK(ctx.queue.reap_expired(1200) == 1);
 
     auto message = ctx.queue.get("msg-1");
     REQUIRE(message.has_value());
     CHECK(message->status == qu::MessageStatus::Pending);
-    CHECK_FALSE(message->worker_id.has_value());
+    CHECK_FALSE(message->consumer_id.has_value());
 }
 
 TEST_CASE("non-expired claims are not reaped")
 {
     TestContext ctx;
     ctx.queue.enqueue("msg-1", mt::Json::object({}), 1000);
-    REQUIRE(ctx.queue.claim_next("worker-1", 1100).has_value());
+    REQUIRE(ctx.queue.claim_next("consumer-1", 1100).has_value());
 
     CHECK(ctx.queue.reap_expired(1199) == 0);
 
@@ -163,11 +163,11 @@ TEST_CASE("queue operations can use caller-owned transactions")
             REQUIRE(pending.has_value());
             CHECK(pending->status == qu::MessageStatus::Pending);
 
-            auto claimed = ctx.queue.claim_next(tx, "worker-1", 1100);
+            auto claimed = ctx.queue.claim_next(tx, "consumer-1", 1100);
             REQUIRE(claimed.has_value());
             CHECK(claimed->id == "msg-1");
 
-            ctx.queue.ack(tx, claimed->id, claimed->worker_id, 1200);
+            ctx.queue.ack(tx, claimed->id, claimed->consumer_id, 1200);
 
             auto processed = ctx.queue.get(tx, "msg-1");
             REQUIRE(processed.has_value());
@@ -184,7 +184,7 @@ TEST_CASE("reap_expired can use a caller-owned transaction")
 {
     TestContext ctx;
     ctx.queue.enqueue("msg-1", mt::Json::object({}), 1000);
-    REQUIRE(ctx.queue.claim_next("worker-1", 1100).has_value());
+    REQUIRE(ctx.queue.claim_next("consumer-1", 1100).has_value());
 
     mt::TransactionProvider txs{ctx.database};
     auto reaped = txs.run([&](mt::Transaction& tx) { return ctx.queue.reap_expired(tx, 1200); });
@@ -212,12 +212,12 @@ TEST_CASE("namespaces and channels scope message ids")
         qu::DuplicateMessage
     );
 
-    auto team_a_notification = ctx.queue.claim_next("team-a", "notifications", "worker-1", 1100);
+    auto team_a_notification = ctx.queue.claim_next("team-a", "notifications", "consumer-1", 1100);
     REQUIRE(team_a_notification.has_value());
     CHECK(team_a_notification->namespace_name == "team-a");
     CHECK(team_a_notification->channel_name == "notifications");
 
-    auto team_b_notification = ctx.queue.claim_next("team-b", "notifications", "worker-2", 1100);
+    auto team_b_notification = ctx.queue.claim_next("team-b", "notifications", "consumer-2", 1100);
     REQUIRE(team_b_notification.has_value());
     CHECK(team_b_notification->namespace_name == "team-b");
     CHECK(team_b_notification->channel_name == "notifications");

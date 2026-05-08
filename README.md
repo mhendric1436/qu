@@ -118,7 +118,7 @@ txs.run(
             tx,
             workflowExecutionId,
             "send-email",
-            "worker:1",
+            "consumer:1",
             mt::Json::object({{"queuedMessageId", "message:1"}})
         );
     }
@@ -174,7 +174,7 @@ void run_queue(mt::Database& database)
         claimed->namespace_name,
         claimed->channel_name,
         claimed->id,
-        claimed->worker_id,
+        claimed->consumer_id,
         now_ms + 250
     );
 }

@@ -66,7 +66,7 @@ QueuedMessage to_public_message(const tables::QueueMessageRow& row)
         .id = row.id,
         .status = status_from_string(row.status),
         .payload = row.payload,
-        .worker_id = row.workerId,
+        .consumer_id = row.consumerId,
         .created_at_ms = row.createdAtMs,
         .claimed_at_ms = row.claimedAtMs,
         .claimed_until_ms = row.claimedUntilMs,
@@ -77,7 +77,7 @@ QueuedMessage to_public_message(const tables::QueueMessageRow& row)
 
 ClaimedMessage to_claimed_message(const tables::QueueMessageRow& row)
 {
-    if (!row.workerId || !row.claimedUntilMs)
+    if (!row.consumerId || !row.claimedUntilMs)
     {
         throw InvalidMessageState("claimed message is missing claim metadata");
     }
@@ -87,7 +87,7 @@ ClaimedMessage to_claimed_message(const tables::QueueMessageRow& row)
         .channel_name = row.channelName,
         .id = row.id,
         .payload = row.payload,
-        .worker_id = *row.workerId,
+        .consumer_id = *row.consumerId,
         .attempt = row.attempt,
         .claimed_until_ms = *row.claimedUntilMs
     };
@@ -145,12 +145,12 @@ mt::QuerySpec namespace_query(const std::string& namespace_name)
 
 void require_claimed_by(
     const tables::QueueMessageRow& row,
-    const std::string& worker_id
+    const std::string& consumer_id
 )
 {
-    if (row.status != STATUS_CLAIMED || !row.workerId || *row.workerId != worker_id)
+    if (row.status != STATUS_CLAIMED || !row.consumerId || *row.consumerId != consumer_id)
     {
-        throw InvalidMessageState("message is not claimed by worker");
+        throw InvalidMessageState("message is not claimed by consumer");
     }
 }
 
@@ -257,19 +257,19 @@ void Queue::enqueue(
 }
 
 std::optional<ClaimedMessage> Queue::claim_next(
-    std::string worker_id,
+    std::string consumer_id,
     std::int64_t now_ms
 ) const
 {
     return claim_next(
-        std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(worker_id), now_ms
+        std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(consumer_id), now_ms
     );
 }
 
 std::optional<ClaimedMessage> Queue::claim_next(
     std::string namespace_name,
     std::string channel_name,
-    std::string worker_id,
+    std::string consumer_id,
     std::int64_t now_ms
 ) const
 {
@@ -279,7 +279,8 @@ std::optional<ClaimedMessage> Queue::claim_next(
         [&](mt::Transaction& tx) -> std::optional<ClaimedMessage>
         {
             return claim_next(
-                tx, std::move(namespace_name), std::move(channel_name), std::move(worker_id), now_ms
+                tx, std::move(namespace_name), std::move(channel_name), std::move(consumer_id),
+                now_ms
             );
         }
     );
@@ -287,12 +288,12 @@ std::optional<ClaimedMessage> Queue::claim_next(
 
 std::optional<ClaimedMessage> Queue::claim_next(
     mt::Transaction& tx,
-    std::string worker_id,
+    std::string consumer_id,
     std::int64_t now_ms
 ) const
 {
     return claim_next(
-        tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(worker_id),
+        tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(consumer_id),
         now_ms
     );
 }
@@ -301,7 +302,7 @@ std::optional<ClaimedMessage> Queue::claim_next(
     mt::Transaction& tx,
     std::string namespace_name,
     std::string channel_name,
-    std::string worker_id,
+    std::string consumer_id,
     std::int64_t now_ms
 ) const
 {
@@ -317,7 +318,7 @@ std::optional<ClaimedMessage> Queue::claim_next(
 
     auto row = std::move(pending.front());
     row.status = status_to_string(MessageStatus::Claimed);
-    row.workerId = std::move(worker_id);
+    row.consumerId = std::move(consumer_id);
     row.claimedAtMs = now_ms;
     row.claimedUntilMs = now_ms + config_.visibility_timeout_ms;
     row.processedAtMs = std::nullopt;
@@ -329,19 +330,19 @@ std::optional<ClaimedMessage> Queue::claim_next(
 
 void Queue::ack(
     std::string id,
-    std::string worker_id,
+    std::string consumer_id,
     std::int64_t now_ms
 ) const
 {
     ack(std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
-        std::move(worker_id), now_ms);
+        std::move(consumer_id), now_ms);
 }
 
 void Queue::ack(
     std::string namespace_name,
     std::string channel_name,
     std::string id,
-    std::string worker_id,
+    std::string consumer_id,
     std::int64_t now_ms
 ) const
 {
@@ -351,7 +352,7 @@ void Queue::ack(
         [&](mt::Transaction& tx)
         {
             ack(tx, std::move(namespace_name), std::move(channel_name), std::move(id),
-                std::move(worker_id), now_ms);
+                std::move(consumer_id), now_ms);
         }
     );
 }
@@ -359,12 +360,12 @@ void Queue::ack(
 void Queue::ack(
     mt::Transaction& tx,
     std::string id,
-    std::string worker_id,
+    std::string consumer_id,
     std::int64_t now_ms
 ) const
 {
     ack(tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
-        std::move(worker_id), now_ms);
+        std::move(consumer_id), now_ms);
 }
 
 void Queue::ack(
@@ -372,13 +373,13 @@ void Queue::ack(
     std::string namespace_name,
     std::string channel_name,
     std::string id,
-    std::string worker_id,
+    std::string consumer_id,
     std::int64_t now_ms
 ) const
 {
     auto messages = queue_table(*database_);
     auto row = messages.require(tx, message_key(namespace_name, channel_name, id));
-    require_claimed_by(row, worker_id);
+    require_claimed_by(row, consumer_id);
 
     row.status = status_to_string(MessageStatus::Processed);
     row.processedAtMs = now_ms;
@@ -389,12 +390,12 @@ void Queue::ack(
 
 void Queue::fail(
     std::string id,
-    std::string worker_id
+    std::string consumer_id
 ) const
 {
     fail(
         std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
-        std::move(worker_id)
+        std::move(consumer_id)
     );
 }
 
@@ -402,7 +403,7 @@ void Queue::fail(
     std::string namespace_name,
     std::string channel_name,
     std::string id,
-    std::string worker_id
+    std::string consumer_id
 ) const
 {
     mt::TransactionProvider txs{*database_};
@@ -412,7 +413,7 @@ void Queue::fail(
         {
             fail(
                 tx, std::move(namespace_name), std::move(channel_name), std::move(id),
-                std::move(worker_id)
+                std::move(consumer_id)
             );
         }
     );
@@ -421,12 +422,12 @@ void Queue::fail(
 void Queue::fail(
     mt::Transaction& tx,
     std::string id,
-    std::string worker_id
+    std::string consumer_id
 ) const
 {
     fail(
         tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
-        std::move(worker_id)
+        std::move(consumer_id)
     );
 }
 
@@ -435,15 +436,15 @@ void Queue::fail(
     std::string namespace_name,
     std::string channel_name,
     std::string id,
-    std::string worker_id
+    std::string consumer_id
 ) const
 {
     auto messages = queue_table(*database_);
     auto row = messages.require(tx, message_key(namespace_name, channel_name, id));
-    require_claimed_by(row, worker_id);
+    require_claimed_by(row, consumer_id);
 
     row.status = status_to_string(MessageStatus::Pending);
-    row.workerId = std::nullopt;
+    row.consumerId = std::nullopt;
     row.claimedAtMs = std::nullopt;
     row.claimedUntilMs = std::nullopt;
     messages.put(tx, row);
@@ -497,7 +498,7 @@ std::size_t Queue::reap_expired(
         }
 
         row.status = status_to_string(MessageStatus::Pending);
-        row.workerId = std::nullopt;
+        row.consumerId = std::nullopt;
         row.claimedAtMs = std::nullopt;
         row.claimedUntilMs = std::nullopt;
         messages.put(tx, row);

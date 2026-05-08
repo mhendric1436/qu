@@ -32,7 +32,7 @@ struct QueuedMessage
     std::string id;
     MessageStatus status = MessageStatus::Pending;
     mt::Json payload = mt::Json::object({});
-    std::optional<std::string> worker_id;
+    std::optional<std::string> consumer_id;
     std::int64_t created_at_ms = 0;
     std::optional<std::int64_t> claimed_at_ms;
     std::optional<std::int64_t> claimed_until_ms;
@@ -46,7 +46,7 @@ struct ClaimedMessage
     std::string channel_name;
     std::string id;
     mt::Json payload = mt::Json::object({});
-    std::string worker_id;
+    std::string consumer_id;
     std::int64_t attempt = 0;
     std::int64_t claimed_until_ms = 0;
 };
@@ -108,20 +108,20 @@ class Queue
     ) const;
 
     std::optional<ClaimedMessage> claim_next(
-        std::string worker_id,
+        std::string consumer_id,
         std::int64_t now_ms
     ) const;
 
     std::optional<ClaimedMessage> claim_next(
         std::string namespace_name,
         std::string channel_name,
-        std::string worker_id,
+        std::string consumer_id,
         std::int64_t now_ms
     ) const;
 
     std::optional<ClaimedMessage> claim_next(
         mt::Transaction& tx,
-        std::string worker_id,
+        std::string consumer_id,
         std::int64_t now_ms
     ) const;
 
@@ -129,26 +129,26 @@ class Queue
         mt::Transaction& tx,
         std::string namespace_name,
         std::string channel_name,
-        std::string worker_id,
+        std::string consumer_id,
         std::int64_t now_ms
     ) const;
 
     void
     ack(std::string id,
-        std::string worker_id,
+        std::string consumer_id,
         std::int64_t now_ms) const;
 
     void
     ack(std::string namespace_name,
         std::string channel_name,
         std::string id,
-        std::string worker_id,
+        std::string consumer_id,
         std::int64_t now_ms) const;
 
     void
     ack(mt::Transaction& tx,
         std::string id,
-        std::string worker_id,
+        std::string consumer_id,
         std::int64_t now_ms) const;
 
     void
@@ -156,25 +156,25 @@ class Queue
         std::string namespace_name,
         std::string channel_name,
         std::string id,
-        std::string worker_id,
+        std::string consumer_id,
         std::int64_t now_ms) const;
 
     void fail(
         std::string id,
-        std::string worker_id
+        std::string consumer_id
     ) const;
 
     void fail(
         std::string namespace_name,
         std::string channel_name,
         std::string id,
-        std::string worker_id
+        std::string consumer_id
     ) const;
 
     void fail(
         mt::Transaction& tx,
         std::string id,
-        std::string worker_id
+        std::string consumer_id
     ) const;
 
     void fail(
@@ -182,7 +182,7 @@ class Queue
         std::string namespace_name,
         std::string channel_name,
         std::string id,
-        std::string worker_id
+        std::string consumer_id
     ) const;
 
     std::size_t reap_expired(std::int64_t now_ms) const;

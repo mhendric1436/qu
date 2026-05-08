@@ -18,7 +18,7 @@ struct QueueMessageRow
     std::string id;
     std::string status;
     mt::Json payload = mt::Json::object({});
-    std::optional<std::string> workerId;
+    std::optional<std::string> consumerId;
     std::int64_t createdAtMs;
     std::optional<std::int64_t> claimedAtMs;
     std::optional<std::int64_t> claimedUntilMs;
@@ -34,14 +34,14 @@ struct QueueMessageRow
 struct QueueMessageRowMapping
 {
     static constexpr std::string_view table_name = "queue_messages";
-    static constexpr int schema_version = 2;
+    static constexpr int schema_version = 3;
     static constexpr std::string_view key_separator = "\u001f";
     static constexpr std::string_view field_namespaceName = "namespaceName";
     static constexpr std::string_view field_channelName = "channelName";
     static constexpr std::string_view field_id = "id";
     static constexpr std::string_view field_status = "status";
     static constexpr std::string_view field_payload = "payload";
-    static constexpr std::string_view field_workerId = "workerId";
+    static constexpr std::string_view field_consumerId = "consumerId";
     static constexpr std::string_view field_createdAtMs = "createdAtMs";
     static constexpr std::string_view field_claimedAtMs = "claimedAtMs";
     static constexpr std::string_view field_claimedUntilMs = "claimedUntilMs";
@@ -71,7 +71,7 @@ struct QueueMessageRowMapping
             mt::FieldSpec::json(std::string(field_payload))
                 .mark_required(false)
                 .with_default(mt::Json::object({})),
-            mt::FieldSpec::optional(std::string(field_workerId), mt::FieldType::String)
+            mt::FieldSpec::optional(std::string(field_consumerId), mt::FieldType::String)
                 .mark_required(true),
             mt::FieldSpec::int64(std::string(field_createdAtMs)).mark_required(true),
             mt::FieldSpec::optional(std::string(field_claimedAtMs), mt::FieldType::Int64)
@@ -94,8 +94,8 @@ struct QueueMessageRowMapping
              {std::string(field_id), row.id},
              {std::string(field_status), row.status},
              {std::string(field_payload), row.payload},
-             {std::string(field_workerId),
-              row.workerId ? mt::Json(*row.workerId) : mt::Json::null()},
+             {std::string(field_consumerId),
+              row.consumerId ? mt::Json(*row.consumerId) : mt::Json::null()},
              {std::string(field_createdAtMs), row.createdAtMs},
              {std::string(field_claimedAtMs),
               row.claimedAtMs ? mt::Json(*row.claimedAtMs) : mt::Json::null()},
@@ -115,10 +115,10 @@ struct QueueMessageRowMapping
             .id = json[std::string(field_id)].as_string(),
             .status = json[std::string(field_status)].as_string(),
             .payload = json[std::string(field_payload)],
-            .workerId =
-                json[std::string(field_workerId)].is_null()
+            .consumerId =
+                json[std::string(field_consumerId)].is_null()
                     ? std::nullopt
-                    : std::optional<std::string>(json[std::string(field_workerId)].as_string()),
+                    : std::optional<std::string>(json[std::string(field_consumerId)].as_string()),
             .createdAtMs = json[std::string(field_createdAtMs)].as_int64(),
             .claimedAtMs =
                 json[std::string(field_claimedAtMs)].is_null()
