@@ -5,6 +5,7 @@
 #include "mt/transaction.hpp"
 #include "tables/generated/queue_message_row.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <set>
@@ -308,13 +309,23 @@ std::optional<ClaimedMessage> Queue::claim_next(
 {
     auto messages = queue_table(*database_);
     auto query = scoped_status_query(namespace_name, channel_name, MessageStatus::Pending);
-    query.limit = std::size_t{1};
-
     auto pending = messages.query(tx, query);
     if (pending.empty())
     {
         return std::nullopt;
     }
+
+    std::sort(
+        pending.begin(), pending.end(),
+        [](const tables::QueueMessageRow& lhs, const tables::QueueMessageRow& rhs)
+        {
+            if (lhs.createdAtMs != rhs.createdAtMs)
+            {
+                return lhs.createdAtMs < rhs.createdAtMs;
+            }
+            return lhs.id < rhs.id;
+        }
+    );
 
     auto row = std::move(pending.front());
     row.status = status_to_string(MessageStatus::Claimed);

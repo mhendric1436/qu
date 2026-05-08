@@ -88,6 +88,9 @@ The physical row key is composed from namespace, channel, and message id. Duplic
 message protection is scoped to that tuple, so two namespaces can safely use the same
 channel and message id.
 
+Within a namespace and channel, pending messages are claimed in enqueue order by
+`createdAtMs`, with message id as a deterministic tie-breaker when timestamps are equal.
+
 The memory backend is process-local and non-durable. It is used here for tests and local
 development. Durable deployments should wire the same queue service to a durable `mt`
 backend once the target backend is selected.

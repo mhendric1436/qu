@@ -77,6 +77,26 @@ TEST_CASE("two consumers do not claim the same pending message")
     CHECK_FALSE(second.has_value());
 }
 
+TEST_CASE("claim_next preserves enqueue order within a namespace and channel")
+{
+    TestContext ctx;
+
+    ctx.queue.enqueue("orders", "created", "msg-c", mt::Json::object({}), 1000);
+    ctx.queue.enqueue("orders", "created", "msg-a", mt::Json::object({}), 1001);
+    ctx.queue.enqueue("orders", "created", "msg-b", mt::Json::object({}), 1002);
+
+    auto first = ctx.queue.claim_next("orders", "created", "consumer-1", 1100);
+    auto second = ctx.queue.claim_next("orders", "created", "consumer-1", 1101);
+    auto third = ctx.queue.claim_next("orders", "created", "consumer-1", 1102);
+
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    REQUIRE(third.has_value());
+    CHECK(first->id == "msg-c");
+    CHECK(second->id == "msg-a");
+    CHECK(third->id == "msg-b");
+}
+
 TEST_CASE("ack marks a claimed message as processed")
 {
     TestContext ctx;
