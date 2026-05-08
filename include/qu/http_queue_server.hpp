@@ -2,9 +2,7 @@
 
 #include "qu/queue_service.hpp"
 
-#include "httplib/httplib.h"
-
-#include <string>
+#include <memory>
 
 namespace qu
 {
@@ -12,22 +10,19 @@ namespace qu
 class HttpQueueServer
 {
   public:
-    explicit HttpQueueServer(QueueService& service);
-
-    bool listen(
-        const std::string& host,
+    HttpQueueServer(
+        QueueService& service,
         int port
     );
+    ~HttpQueueServer();
 
+    int bind();
+    void start();
     void stop();
 
-    httplib::Server& server();
-
   private:
-    void register_routes();
-
-    QueueService* service_ = nullptr;
-    httplib::Server server_;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace qu

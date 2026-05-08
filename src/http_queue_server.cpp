@@ -1,9 +1,11 @@
 #include "qu/http_queue_server.hpp"
 
+#include "httplib/httplib.h"
 #include "mt/json_parser.hpp"
 
 #include <exception>
 #include <functional>
+#include <stdexcept>
 #include <string>
 
 namespace qu
@@ -65,120 +67,182 @@ void handle_json_request(
 
 } // namespace
 
-HttpQueueServer::HttpQueueServer(QueueService& service)
-    : service_(&service)
+struct HttpQueueServer::Impl
 {
-    register_routes();
-}
+    QueueService& service;
+    int port;
+    bool bound = false;
+    httplib::Server server;
 
-bool HttpQueueServer::listen(
-    const std::string& host,
+    Impl(
+        QueueService& service,
+        int port
+    )
+        : service(service),
+          port(port)
+    {
+        register_routes();
+    }
+
+    int bind()
+    {
+        int actual = -1;
+        if (port == 0)
+        {
+            actual = server.bind_to_any_port("0.0.0.0");
+        }
+        else
+        {
+            actual = server.bind_to_port("0.0.0.0", port) ? port : -1;
+        }
+
+        if (actual < 0)
+        {
+            throw std::runtime_error("failed to bind server on port " + std::to_string(port));
+        }
+
+        bound = true;
+        return actual;
+    }
+
+    void start()
+    {
+        if (!bound)
+        {
+            (void)bind();
+        }
+        if (!server.listen_after_bind())
+        {
+            throw std::runtime_error("failed to start server on port " + std::to_string(port));
+        }
+    }
+
+    void stop()
+    {
+        server.stop();
+    }
+
+    void register_routes()
+    {
+        server.Get(
+            R"(/v1/namespaces)", [this](const httplib::Request&, httplib::Response& response)
+            { write_result(response, service.list_namespaces()); }
+        );
+
+        server.Get(
+            R"(/v1/namespaces/([^/]+)/channels)",
+            [this](const httplib::Request& request, httplib::Response& response)
+            { write_result(response, service.list_channels(request.matches[1])); }
+        );
+
+        server.Post(
+            R"(/v1/namespaces/([^/]+)/channels/([^/]+)/messages)",
+            [this](const httplib::Request& request, httplib::Response& response)
+            {
+                auto namespace_name = request.matches[1].str();
+                auto channel_name = request.matches[2].str();
+                handle_json_request(
+                    request, response, [&](const mt::Json& body)
+                    { return service.enqueue_message(namespace_name, channel_name, body); }
+                );
+            }
+        );
+
+        server.Get(
+            R"(/v1/namespaces/([^/]+)/channels/([^/]+)/messages/([^/]+))",
+            [this](const httplib::Request& request, httplib::Response& response)
+            {
+                write_result(
+                    response,
+                    service.get_message(request.matches[1], request.matches[2], request.matches[3])
+                );
+            }
+        );
+
+        server.Post(
+            R"(/v1/namespaces/([^/]+)/channels/([^/]+)/claims)",
+            [this](const httplib::Request& request, httplib::Response& response)
+            {
+                auto namespace_name = request.matches[1].str();
+                auto channel_name = request.matches[2].str();
+                handle_json_request(
+                    request, response, [&](const mt::Json& body)
+                    { return service.claim_next(namespace_name, channel_name, body); }
+                );
+            }
+        );
+
+        server.Post(
+            R"(/v1/namespaces/([^/]+)/channels/([^/]+)/messages/([^/]+)/ack)",
+            [this](const httplib::Request& request, httplib::Response& response)
+            {
+                auto namespace_name = request.matches[1].str();
+                auto channel_name = request.matches[2].str();
+                auto message_id = request.matches[3].str();
+                handle_json_request(
+                    request, response, [&](const mt::Json& body)
+                    { return service.ack_message(namespace_name, channel_name, message_id, body); }
+                );
+            }
+        );
+
+        server.Post(
+            R"(/v1/namespaces/([^/]+)/channels/([^/]+)/messages/([^/]+)/fail)",
+            [this](const httplib::Request& request, httplib::Response& response)
+            {
+                auto namespace_name = request.matches[1].str();
+                auto channel_name = request.matches[2].str();
+                auto message_id = request.matches[3].str();
+                handle_json_request(
+                    request, response, [&](const mt::Json& body)
+                    { return service.fail_message(namespace_name, channel_name, message_id, body); }
+                );
+            }
+        );
+
+        server.Post(
+            R"(/v1/namespaces/([^/]+)/channels/([^/]+)/reap-expired)",
+            [this](const httplib::Request& request, httplib::Response& response)
+            {
+                auto namespace_name = request.matches[1].str();
+                auto channel_name = request.matches[2].str();
+                handle_json_request(
+                    request, response, [&](const mt::Json& body)
+                    { return service.reap_expired(namespace_name, channel_name, body); }
+                );
+            }
+        );
+    }
+};
+
+HttpQueueServer::HttpQueueServer(
+    QueueService& service,
     int port
 )
+    : impl_(
+          std::make_unique<Impl>(
+              service,
+              port
+          )
+      )
 {
-    return server_.listen(host, port);
+}
+
+HttpQueueServer::~HttpQueueServer() = default;
+
+int HttpQueueServer::bind()
+{
+    return impl_->bind();
+}
+
+void HttpQueueServer::start()
+{
+    impl_->start();
 }
 
 void HttpQueueServer::stop()
 {
-    server_.stop();
-}
-
-httplib::Server& HttpQueueServer::server()
-{
-    return server_;
-}
-
-void HttpQueueServer::register_routes()
-{
-    server_.Get(
-        R"(/v1/namespaces)", [this](const httplib::Request&, httplib::Response& response)
-        { write_result(response, service_->list_namespaces()); }
-    );
-
-    server_.Get(
-        R"(/v1/namespaces/([^/]+)/channels)",
-        [this](const httplib::Request& request, httplib::Response& response)
-        { write_result(response, service_->list_channels(request.matches[1])); }
-    );
-
-    server_.Post(
-        R"(/v1/namespaces/([^/]+)/channels/([^/]+)/messages)",
-        [this](const httplib::Request& request, httplib::Response& response)
-        {
-            auto namespace_name = request.matches[1].str();
-            auto channel_name = request.matches[2].str();
-            handle_json_request(
-                request, response, [&](const mt::Json& body)
-                { return service_->enqueue_message(namespace_name, channel_name, body); }
-            );
-        }
-    );
-
-    server_.Get(
-        R"(/v1/namespaces/([^/]+)/channels/([^/]+)/messages/([^/]+))",
-        [this](const httplib::Request& request, httplib::Response& response)
-        {
-            write_result(
-                response,
-                service_->get_message(request.matches[1], request.matches[2], request.matches[3])
-            );
-        }
-    );
-
-    server_.Post(
-        R"(/v1/namespaces/([^/]+)/channels/([^/]+)/claims)",
-        [this](const httplib::Request& request, httplib::Response& response)
-        {
-            auto namespace_name = request.matches[1].str();
-            auto channel_name = request.matches[2].str();
-            handle_json_request(
-                request, response, [&](const mt::Json& body)
-                { return service_->claim_next(namespace_name, channel_name, body); }
-            );
-        }
-    );
-
-    server_.Post(
-        R"(/v1/namespaces/([^/]+)/channels/([^/]+)/messages/([^/]+)/ack)",
-        [this](const httplib::Request& request, httplib::Response& response)
-        {
-            auto namespace_name = request.matches[1].str();
-            auto channel_name = request.matches[2].str();
-            auto message_id = request.matches[3].str();
-            handle_json_request(
-                request, response, [&](const mt::Json& body)
-                { return service_->ack_message(namespace_name, channel_name, message_id, body); }
-            );
-        }
-    );
-
-    server_.Post(
-        R"(/v1/namespaces/([^/]+)/channels/([^/]+)/messages/([^/]+)/fail)",
-        [this](const httplib::Request& request, httplib::Response& response)
-        {
-            auto namespace_name = request.matches[1].str();
-            auto channel_name = request.matches[2].str();
-            auto message_id = request.matches[3].str();
-            handle_json_request(
-                request, response, [&](const mt::Json& body)
-                { return service_->fail_message(namespace_name, channel_name, message_id, body); }
-            );
-        }
-    );
-
-    server_.Post(
-        R"(/v1/namespaces/([^/]+)/channels/([^/]+)/reap-expired)",
-        [this](const httplib::Request& request, httplib::Response& response)
-        {
-            auto namespace_name = request.matches[1].str();
-            auto channel_name = request.matches[2].str();
-            handle_json_request(
-                request, response, [&](const mt::Json& body)
-                { return service_->reap_expired(namespace_name, channel_name, body); }
-            );
-        }
-    );
+    impl_->stop();
 }
 
 } // namespace qu
