@@ -3,7 +3,7 @@
   "table_name": "queue_messages",
   "class_name": "QueueMessageRow",
   "key": {"fields": ["namespaceName", "channelName", "id"], "separator": "\u001f"},
-  "schema_version": 3,
+  "schema_version": 2,
   "fields": [
     {"name": "namespaceName", "type": "string", "required": true},
     {"name": "channelName", "type": "string", "required": true},

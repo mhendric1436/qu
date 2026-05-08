@@ -34,7 +34,7 @@ struct QueueMessageRow
 struct QueueMessageRowMapping
 {
     static constexpr std::string_view table_name = "queue_messages";
-    static constexpr int schema_version = 3;
+    static constexpr int schema_version = 2;
     static constexpr std::string_view key_separator = "\u001f";
     static constexpr std::string_view field_namespaceName = "namespaceName";
     static constexpr std::string_view field_channelName = "channelName";
