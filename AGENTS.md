@@ -10,8 +10,9 @@ library.
 - `src/tables/schemas/` contains private `mt_codegen.py` schema metadata.
 - `src/tables/generated/` contains generated row and mapping headers. Do not edit these by
   hand; update the matching schema and run codegen.
-- `tests/queue_tests.cpp` contains Catch2 unit tests.
+- `tests/` contains Catch2 unit tests for queue and service behavior.
 - `third_party/catch2/` contains the vendored Catch2 amalgamated files.
+- `third_party/httplib/` contains the vendored cpp-httplib header for HTTP transport.
 - `docs/` contains PlantUML architecture diagrams. Generated PNGs are ignored.
 - `images/` contains README imagery.
 
@@ -50,7 +51,8 @@ Run `make docs-png` after changing `docs/*.puml`.
 - Use `rg` or `rg --files` for search.
 - Run `make test` after code changes when feasible.
 - Run `make codegen-check` after schema or generated-header changes.
-- Keep Catch2 as the only vendored third-party code unless the user explicitly asks otherwise.
+- Keep vendored third-party code limited to Catch2 and cpp-httplib unless the user explicitly asks
+  otherwise.
 - Do not edit generated diagram PNGs directly; update `docs/*.puml` and regenerate with
   `make docs-png`.
 - Include a suggested git commit message after every code or documentation change.

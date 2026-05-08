@@ -12,7 +12,8 @@ queue model settles.
 - sibling `mt` checkout at `$(HOME)/repos/mt`
 - optional: `plantuml` for diagram generation
 
-The repository vendors only Catch2 under `third_party/catch2/`.
+The repository vendors Catch2 under `third_party/catch2/` and cpp-httplib under
+`third_party/httplib/`.
 
 ## Build And Test
 
@@ -68,7 +69,7 @@ Please preserve these behaviors unless the contribution explicitly changes them:
 
 ## Tests
 
-Add focused Catch2 tests in `tests/queue_tests.cpp` for behavior changes.
+Add focused Catch2 tests under `tests/` for behavior changes.
 
 Good tests should cover observable queue behavior, especially:
 

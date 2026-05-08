@@ -25,6 +25,7 @@ It currently provides:
 The project is intentionally small and dependency-minimal. Vendored third-party code:
 
 - Catch2 amalgamated test runner (`third_party/catch2/`)
+- cpp-httplib HTTP server/client header (`third_party/httplib/`)
 
 Non-vendored dependency:
 
