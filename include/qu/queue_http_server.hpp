@@ -7,14 +7,14 @@
 namespace qu
 {
 
-class HttpQueueServer
+class QueueHttpServer
 {
   public:
-    HttpQueueServer(
+    QueueHttpServer(
         QueueService& service,
         int port
     );
-    ~HttpQueueServer();
+    ~QueueHttpServer();
 
     int bind();
     void start();

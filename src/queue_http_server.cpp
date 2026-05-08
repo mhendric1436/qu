@@ -1,4 +1,4 @@
-#include "qu/http_queue_server.hpp"
+#include "qu/queue_http_server.hpp"
 
 #include "httplib/httplib.h"
 #include "mt/json_parser.hpp"
@@ -67,7 +67,7 @@ void handle_json_request(
 
 } // namespace
 
-struct HttpQueueServer::Impl
+struct QueueHttpServer::Impl
 {
     QueueService& service;
     int port;
@@ -215,7 +215,7 @@ struct HttpQueueServer::Impl
     }
 };
 
-HttpQueueServer::HttpQueueServer(
+QueueHttpServer::QueueHttpServer(
     QueueService& service,
     int port
 )
@@ -228,19 +228,19 @@ HttpQueueServer::HttpQueueServer(
 {
 }
 
-HttpQueueServer::~HttpQueueServer() = default;
+QueueHttpServer::~QueueHttpServer() = default;
 
-int HttpQueueServer::bind()
+int QueueHttpServer::bind()
 {
     return impl_->bind();
 }
 
-void HttpQueueServer::start()
+void QueueHttpServer::start()
 {
     impl_->start();
 }
 
-void HttpQueueServer::stop()
+void QueueHttpServer::stop()
 {
     impl_->stop();
 }
