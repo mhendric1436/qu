@@ -6,8 +6,11 @@ skinparam shadowing false
 skinparam packageStyle rectangle
 
 actor "Application" as app
+actor "HTTP Client" as httpClient
 
 package "qu" {
+    component "qu::QueueHttpServer\ninclude/qu/queue_http_server.hpp" as httpServer
+    component "qu::QueueService\ninclude/qu/queue_service.hpp" as queueService
     component "qu::Queue\ninclude/qu/queue.hpp" as queue
     component "Queue operations\nsrc/queue.cpp" as ops
     component "Namespace + channel scope" as scope
@@ -15,6 +18,10 @@ package "qu" {
     component "QueueChannelCounterRowMapping\nsrc/tables/generated" as counterMapping
     artifact "queue_message.mt.json\nschema metadata" as schema
     artifact "queue_channel_counter.mt.json\ncounter metadata" as counterSchema
+}
+
+package "third_party" {
+    component "cpp-httplib\nthird_party/httplib" as httplib
 }
 
 package "wf" {
@@ -45,7 +52,11 @@ postgres ..|> backend
 
 app --> queue : enqueue / claim / ack / fail / reap / get
 app --> orchestrator : workflow updates
+httpClient --> httpServer : REST / OpenAPI paths
 
+httpServer --> httplib : HTTP transport
+httpServer --> queueService : route handlers
+queueService --> queue : service methods
 queue --> ops
 ops --> scope : namespace / channel / id
 ops --> txs : convenience overloads
