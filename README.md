@@ -99,6 +99,26 @@ The memory backend is process-local and non-durable. It is used here for tests a
 development. Durable deployments should wire the same queue service to a durable `mt`
 backend once the target backend is selected.
 
+## Trust Domain
+
+`qu` is currently targeted at a single administrative trust domain. The intended callers
+are cooperating producers, consumers, workers, and control-plane services that already
+belong to the same deployment or internal platform boundary.
+
+That means:
+
+- namespaces and channels are coordination scopes, not security boundaries
+- message IDs, consumer IDs, and payloads are caller-provided trusted data
+- visibility timeouts and caller-supplied timestamps assume cooperating components
+- the HTTP layer is a transport convenience for internal services, not a complete public
+  multi-tenant message broker
+
+For a true multi-tenant deployment, a service built on `qu` should add tenant identity,
+authorization, namespace ownership checks, payload size and retention limits, rate limits,
+request auditing, and server-side time ownership before exposing queue operations to
+mutually untrusted callers. In that model, `qu::Queue` should remain the backend-neutral
+primitive while the outer service layer enforces tenant isolation and policy.
+
 ## Caller-Owned Transactions
 
 Each queue operation has a convenience overload that opens and commits its own
