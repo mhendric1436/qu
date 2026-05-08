@@ -14,6 +14,7 @@ It currently provides:
 - acknowledge by marking a claimed message as processed
 - fail/retry by returning a claimed message to pending
 - reaping expired claims back to pending
+- namespace and channel scoped messages in a single queue table
 - backend-neutral queue service API over `mt::Database`
 - caller-owned transaction overloads for composing queue operations with other `mt` users
 - memory-backed tests using `mt::backends::memory::MemoryBackend`
@@ -61,21 +62,31 @@ qu/
 
 ## Queue Model
 
-The queue stores one row per message. A message starts as `pending`, can be claimed by a
-worker as `claimed`, and is acknowledged as `processed`.
+The queue stores one row per message. Each message belongs to a namespace and channel,
+so applications can use common channel names such as `notifications` or `billing`
+without collisions across tenants, subsystems, or product areas.
 
-Claiming is protected by an `mt` predicate read on pending messages. If two workers race
-to claim the same observed pending message, the first commit wins and the second commit
-conflicts or observes that no pending message remains.
+A message starts as `pending`, can be claimed by a consumer as `claimed`, and is
+acknowledged as `processed`.
+
+Claiming is protected by an `mt` predicate read on pending messages. If two consumers
+race to claim the same observed pending message, the first commit wins and the second
+commit conflicts or observes that no pending message remains.
 
 The current row schema stores:
 
+- namespace name
+- channel name
 - message id
 - status
 - payload JSON
-- worker id for claimed messages
+- consumer id for claimed messages
 - creation, claim, visibility, and processing timestamps
 - attempt count
+
+The physical row key is composed from namespace, channel, and message id. Duplicate
+message protection is scoped to that tuple, so two namespaces can safely use the same
+channel and message id.
 
 The memory backend is process-local and non-durable. It is used here for tests and local
 development. Durable deployments should wire the same queue service to a durable `mt`
@@ -96,6 +107,8 @@ txs.run(
     {
         queue.enqueue(
             tx,
+            "workflow",
+            "email",
             "message:1",
             mt::Json::object({{"workflowExecutionId", workflowExecutionId}}),
             now_ms
@@ -138,6 +151,8 @@ void run_queue(mt::Database& database)
     const std::int64_t now_ms = 1710000000000;
 
     queue.enqueue(
+        "examples",
+        "email",
         "message:1",
         mt::Json::object({
             {"type", "send-email"},
@@ -146,7 +161,7 @@ void run_queue(mt::Database& database)
         now_ms
     );
 
-    auto claimed = queue.claim_next("worker:1", now_ms + 100);
+    auto claimed = queue.claim_next("examples", "email", "consumer:1", now_ms + 100);
     if (!claimed)
     {
         return;
@@ -155,7 +170,13 @@ void run_queue(mt::Database& database)
     // Process claimed->payload here.
     std::cout << "processing " << claimed->id << "\n";
 
-    queue.ack(claimed->id, claimed->worker_id, now_ms + 250);
+    queue.ack(
+        claimed->namespace_name,
+        claimed->channel_name,
+        claimed->id,
+        claimed->worker_id,
+        now_ms + 250
+    );
 }
 ```
 

@@ -13,6 +13,8 @@ namespace qu::tables
 
 struct QueueMessageRow
 {
+    std::string namespaceName;
+    std::string channelName;
     std::string id;
     std::string status;
     mt::Json payload = mt::Json::object({});
@@ -32,7 +34,10 @@ struct QueueMessageRow
 struct QueueMessageRowMapping
 {
     static constexpr std::string_view table_name = "queue_messages";
-    static constexpr int schema_version = 1;
+    static constexpr int schema_version = 2;
+    static constexpr std::string_view key_separator = "\u001f";
+    static constexpr std::string_view field_namespaceName = "namespaceName";
+    static constexpr std::string_view field_channelName = "channelName";
     static constexpr std::string_view field_id = "id";
     static constexpr std::string_view field_status = "status";
     static constexpr std::string_view field_payload = "payload";
@@ -42,18 +47,25 @@ struct QueueMessageRowMapping
     static constexpr std::string_view field_claimedUntilMs = "claimedUntilMs";
     static constexpr std::string_view field_processedAtMs = "processedAtMs";
     static constexpr std::string_view field_attempt = "attempt";
-    static constexpr std::string_view key_field = field_id;
-    static constexpr std::string_view index_0_name = "idx_queue_message_status";
-    static constexpr std::string_view index_0_path = "$.status";
+    static constexpr std::string_view key_field = "namespaceName\u001fchannelName\u001fid";
+    static constexpr std::string_view index_0_name = "idx_queue_message_namespace";
+    static constexpr std::string_view index_0_path = "$.namespaceName";
+    static constexpr std::string_view index_1_name = "idx_queue_message_channel";
+    static constexpr std::string_view index_1_path = "$.channelName";
+    static constexpr std::string_view index_2_name = "idx_queue_message_status";
+    static constexpr std::string_view index_2_path = "$.status";
 
     static std::string key(const QueueMessageRow& row)
     {
-        return row.id;
+        return row.namespaceName + std::string(key_separator) + row.channelName +
+               std::string(key_separator) + row.id;
     }
 
     static std::vector<mt::FieldSpec> fields()
     {
         return {
+            mt::FieldSpec::string(std::string(field_namespaceName)).mark_required(true),
+            mt::FieldSpec::string(std::string(field_channelName)).mark_required(true),
             mt::FieldSpec::string(std::string(field_id)).mark_required(true),
             mt::FieldSpec::string(std::string(field_status)).mark_required(true),
             mt::FieldSpec::json(std::string(field_payload))
@@ -77,7 +89,9 @@ struct QueueMessageRowMapping
     static mt::Json to_json(const QueueMessageRow& row)
     {
         return mt::Json::object(
-            {{std::string(field_id), row.id},
+            {{std::string(field_namespaceName), row.namespaceName},
+             {std::string(field_channelName), row.channelName},
+             {std::string(field_id), row.id},
              {std::string(field_status), row.status},
              {std::string(field_payload), row.payload},
              {std::string(field_workerId),
@@ -96,6 +110,8 @@ struct QueueMessageRowMapping
     static QueueMessageRow from_json(const mt::Json& json)
     {
         return QueueMessageRow{
+            .namespaceName = json[std::string(field_namespaceName)].as_string(),
+            .channelName = json[std::string(field_channelName)].as_string(),
             .id = json[std::string(field_id)].as_string(),
             .status = json[std::string(field_status)].as_string(),
             .payload = json[std::string(field_payload)],
@@ -125,7 +141,9 @@ struct QueueMessageRowMapping
     static std::vector<mt::IndexSpec> indexes()
     {
         return {
-            mt::IndexSpec::json_path_index(std::string(index_0_name), std::string(index_0_path))
+            mt::IndexSpec::json_path_index(std::string(index_0_name), std::string(index_0_path)),
+            mt::IndexSpec::json_path_index(std::string(index_1_name), std::string(index_1_path)),
+            mt::IndexSpec::json_path_index(std::string(index_2_name), std::string(index_2_path))
         };
     }
 };

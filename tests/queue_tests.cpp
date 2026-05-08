@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -192,4 +193,68 @@ TEST_CASE("reap_expired can use a caller-owned transaction")
     auto stored = ctx.queue.get("msg-1");
     REQUIRE(stored.has_value());
     CHECK(stored->status == qu::MessageStatus::Pending);
+}
+
+TEST_CASE("namespaces and channels scope message ids")
+{
+    TestContext ctx;
+
+    ctx.queue.enqueue(
+        "team-a", "notifications", "msg-1", mt::Json::object({{"tenant", "a"}}), 1000
+    );
+    ctx.queue.enqueue(
+        "team-b", "notifications", "msg-1", mt::Json::object({{"tenant", "b"}}), 1000
+    );
+    ctx.queue.enqueue("team-a", "billing", "msg-1", mt::Json::object({{"tenant", "a"}}), 1000);
+
+    CHECK_THROWS_AS(
+        ctx.queue.enqueue("team-a", "notifications", "msg-1", mt::Json::object({}), 1001),
+        qu::DuplicateMessage
+    );
+
+    auto team_a_notification = ctx.queue.claim_next("team-a", "notifications", "worker-1", 1100);
+    REQUIRE(team_a_notification.has_value());
+    CHECK(team_a_notification->namespace_name == "team-a");
+    CHECK(team_a_notification->channel_name == "notifications");
+
+    auto team_b_notification = ctx.queue.claim_next("team-b", "notifications", "worker-2", 1100);
+    REQUIRE(team_b_notification.has_value());
+    CHECK(team_b_notification->namespace_name == "team-b");
+    CHECK(team_b_notification->channel_name == "notifications");
+
+    auto team_a_billing = ctx.queue.get("team-a", "billing", "msg-1");
+    REQUIRE(team_a_billing.has_value());
+    CHECK(team_a_billing->status == qu::MessageStatus::Pending);
+}
+
+TEST_CASE("namespaces and channels can be listed")
+{
+    TestContext ctx;
+    ctx.queue.enqueue("team-b", "notifications", "msg-1", mt::Json::object({}), 1000);
+    ctx.queue.enqueue("team-a", "billing", "msg-2", mt::Json::object({}), 1000);
+    ctx.queue.enqueue("team-a", "notifications", "msg-3", mt::Json::object({}), 1000);
+    ctx.queue.enqueue("team-a", "billing", "msg-4", mt::Json::object({}), 1000);
+
+    CHECK(ctx.queue.list_namespaces() == std::vector<std::string>{"team-a", "team-b"});
+    CHECK(
+        ctx.queue.list_channels("team-a") == std::vector<std::string>{"billing", "notifications"}
+    );
+    CHECK(ctx.queue.list_channels("missing").empty());
+}
+
+TEST_CASE("namespace and channel listing can use caller-owned transactions")
+{
+    TestContext ctx;
+    mt::TransactionProvider txs{ctx.database};
+
+    txs.run(
+        [&](mt::Transaction& tx)
+        {
+            ctx.queue.enqueue(tx, "team-a", "billing", "msg-1", mt::Json::object({}), 1000);
+            ctx.queue.enqueue(tx, "team-b", "notifications", "msg-2", mt::Json::object({}), 1000);
+
+            CHECK(ctx.queue.list_namespaces(tx) == std::vector<std::string>{"team-a", "team-b"});
+            CHECK(ctx.queue.list_channels(tx, "team-a") == std::vector<std::string>{"billing"});
+        }
+    );
 }

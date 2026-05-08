@@ -7,8 +7,10 @@
 
 #include <cstddef>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace qu
 {
@@ -18,6 +20,8 @@ namespace
 constexpr std::string_view STATUS_PENDING = "pending";
 constexpr std::string_view STATUS_CLAIMED = "claimed";
 constexpr std::string_view STATUS_PROCESSED = "processed";
+constexpr std::string_view DEFAULT_NAMESPACE = "default";
+constexpr std::string_view DEFAULT_CHANNEL = "default";
 
 using QueueMessageTable = mt::Table<tables::QueueMessageRow, tables::QueueMessageRowMapping>;
 
@@ -57,6 +61,8 @@ MessageStatus status_from_string(const std::string& status)
 QueuedMessage to_public_message(const tables::QueueMessageRow& row)
 {
     return QueuedMessage{
+        .namespace_name = row.namespaceName,
+        .channel_name = row.channelName,
         .id = row.id,
         .status = status_from_string(row.status),
         .payload = row.payload,
@@ -77,6 +83,8 @@ ClaimedMessage to_claimed_message(const tables::QueueMessageRow& row)
     }
 
     return ClaimedMessage{
+        .namespace_name = row.namespaceName,
+        .channel_name = row.channelName,
         .id = row.id,
         .payload = row.payload,
         .worker_id = *row.workerId,
@@ -89,6 +97,50 @@ QueueMessageTable queue_table(mt::Database& database)
 {
     mt::TableProvider tables{database};
     return tables.table<tables::QueueMessageRow, tables::QueueMessageRowMapping>();
+}
+
+std::string message_key(
+    const std::string& namespace_name,
+    const std::string& channel_name,
+    const std::string& id
+)
+{
+    return tables::QueueMessageRowMapping::key(
+        tables::QueueMessageRow{
+            .namespaceName = namespace_name,
+            .channelName = channel_name,
+            .id = id,
+            .status = std::string(STATUS_PENDING),
+            .createdAtMs = 0
+        }
+    );
+}
+
+mt::QuerySpec scoped_status_query(
+    const std::string& namespace_name,
+    const std::string& channel_name,
+    MessageStatus status
+)
+{
+    auto query = mt::QuerySpec::where_json_eq("$.namespaceName", mt::Json(namespace_name));
+    query.predicates.push_back(
+        mt::QueryPredicate{
+            .op = mt::QueryOp::JsonEquals, .path = "$.channelName", .value = mt::Json(channel_name)
+        }
+    );
+    query.predicates.push_back(
+        mt::QueryPredicate{
+            .op = mt::QueryOp::JsonEquals,
+            .path = "$.status",
+            .value = mt::Json(status_to_string(status))
+        }
+    );
+    return query;
+}
+
+mt::QuerySpec namespace_query(const std::string& namespace_name)
+{
+    return mt::QuerySpec::where_json_eq("$.namespaceName", mt::Json(namespace_name));
 }
 
 void require_claimed_by(
@@ -135,9 +187,31 @@ void Queue::enqueue(
     std::int64_t now_ms
 ) const
 {
+    enqueue(
+        std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
+        std::move(payload), now_ms
+    );
+}
+
+void Queue::enqueue(
+    std::string namespace_name,
+    std::string channel_name,
+    std::string id,
+    mt::Json payload,
+    std::int64_t now_ms
+) const
+{
     mt::TransactionProvider txs{*database_};
 
-    txs.run([&](mt::Transaction& tx) { enqueue(tx, std::move(id), std::move(payload), now_ms); });
+    txs.run(
+        [&](mt::Transaction& tx)
+        {
+            enqueue(
+                tx, std::move(namespace_name), std::move(channel_name), std::move(id),
+                std::move(payload), now_ms
+            );
+        }
+    );
 }
 
 void Queue::enqueue(
@@ -147,15 +221,33 @@ void Queue::enqueue(
     std::int64_t now_ms
 ) const
 {
-    auto messages = queue_table(*database_);
+    enqueue(
+        tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
+        std::move(payload), now_ms
+    );
+}
 
-    if (messages.get(tx, id))
+void Queue::enqueue(
+    mt::Transaction& tx,
+    std::string namespace_name,
+    std::string channel_name,
+    std::string id,
+    mt::Json payload,
+    std::int64_t now_ms
+) const
+{
+    auto messages = queue_table(*database_);
+    auto key = message_key(namespace_name, channel_name, id);
+
+    if (messages.get(tx, key))
     {
         throw DuplicateMessage(id);
     }
 
     messages.put(
         tx, tables::QueueMessageRow{
+                .namespaceName = std::move(namespace_name),
+                .channelName = std::move(channel_name),
                 .id = std::move(id),
                 .status = status_to_string(MessageStatus::Pending),
                 .payload = std::move(payload),
@@ -169,11 +261,27 @@ std::optional<ClaimedMessage> Queue::claim_next(
     std::int64_t now_ms
 ) const
 {
+    return claim_next(
+        std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(worker_id), now_ms
+    );
+}
+
+std::optional<ClaimedMessage> Queue::claim_next(
+    std::string namespace_name,
+    std::string channel_name,
+    std::string worker_id,
+    std::int64_t now_ms
+) const
+{
     mt::TransactionProvider txs{*database_};
 
     return txs.run(
         [&](mt::Transaction& tx) -> std::optional<ClaimedMessage>
-        { return claim_next(tx, std::move(worker_id), now_ms); }
+        {
+            return claim_next(
+                tx, std::move(namespace_name), std::move(channel_name), std::move(worker_id), now_ms
+            );
+        }
     );
 }
 
@@ -183,10 +291,22 @@ std::optional<ClaimedMessage> Queue::claim_next(
     std::int64_t now_ms
 ) const
 {
-    auto messages = queue_table(*database_);
-    auto query = mt::QuerySpec::where_json_eq(
-        "$.status", mt::Json(status_to_string(MessageStatus::Pending))
+    return claim_next(
+        tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(worker_id),
+        now_ms
     );
+}
+
+std::optional<ClaimedMessage> Queue::claim_next(
+    mt::Transaction& tx,
+    std::string namespace_name,
+    std::string channel_name,
+    std::string worker_id,
+    std::int64_t now_ms
+) const
+{
+    auto messages = queue_table(*database_);
+    auto query = scoped_status_query(namespace_name, channel_name, MessageStatus::Pending);
     query.limit = std::size_t{1};
 
     auto pending = messages.query(tx, query);
@@ -213,9 +333,27 @@ void Queue::ack(
     std::int64_t now_ms
 ) const
 {
+    ack(std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
+        std::move(worker_id), now_ms);
+}
+
+void Queue::ack(
+    std::string namespace_name,
+    std::string channel_name,
+    std::string id,
+    std::string worker_id,
+    std::int64_t now_ms
+) const
+{
     mt::TransactionProvider txs{*database_};
 
-    txs.run([&](mt::Transaction& tx) { ack(tx, std::move(id), std::move(worker_id), now_ms); });
+    txs.run(
+        [&](mt::Transaction& tx)
+        {
+            ack(tx, std::move(namespace_name), std::move(channel_name), std::move(id),
+                std::move(worker_id), now_ms);
+        }
+    );
 }
 
 void Queue::ack(
@@ -225,8 +363,21 @@ void Queue::ack(
     std::int64_t now_ms
 ) const
 {
+    ack(tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
+        std::move(worker_id), now_ms);
+}
+
+void Queue::ack(
+    mt::Transaction& tx,
+    std::string namespace_name,
+    std::string channel_name,
+    std::string id,
+    std::string worker_id,
+    std::int64_t now_ms
+) const
+{
     auto messages = queue_table(*database_);
-    auto row = messages.require(tx, id);
+    auto row = messages.require(tx, message_key(namespace_name, channel_name, id));
     require_claimed_by(row, worker_id);
 
     row.status = status_to_string(MessageStatus::Processed);
@@ -241,9 +392,30 @@ void Queue::fail(
     std::string worker_id
 ) const
 {
+    fail(
+        std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
+        std::move(worker_id)
+    );
+}
+
+void Queue::fail(
+    std::string namespace_name,
+    std::string channel_name,
+    std::string id,
+    std::string worker_id
+) const
+{
     mt::TransactionProvider txs{*database_};
 
-    txs.run([&](mt::Transaction& tx) { fail(tx, std::move(id), std::move(worker_id)); });
+    txs.run(
+        [&](mt::Transaction& tx)
+        {
+            fail(
+                tx, std::move(namespace_name), std::move(channel_name), std::move(id),
+                std::move(worker_id)
+            );
+        }
+    );
 }
 
 void Queue::fail(
@@ -252,8 +424,22 @@ void Queue::fail(
     std::string worker_id
 ) const
 {
+    fail(
+        tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), std::move(id),
+        std::move(worker_id)
+    );
+}
+
+void Queue::fail(
+    mt::Transaction& tx,
+    std::string namespace_name,
+    std::string channel_name,
+    std::string id,
+    std::string worker_id
+) const
+{
     auto messages = queue_table(*database_);
-    auto row = messages.require(tx, id);
+    auto row = messages.require(tx, message_key(namespace_name, channel_name, id));
     require_claimed_by(row, worker_id);
 
     row.status = status_to_string(MessageStatus::Pending);
@@ -265,9 +451,21 @@ void Queue::fail(
 
 std::size_t Queue::reap_expired(std::int64_t now_ms) const
 {
+    return reap_expired(std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), now_ms);
+}
+
+std::size_t Queue::reap_expired(
+    std::string namespace_name,
+    std::string channel_name,
+    std::int64_t now_ms
+) const
+{
     mt::TransactionProvider txs{*database_};
 
-    return txs.run([&](mt::Transaction& tx) -> std::size_t { return reap_expired(tx, now_ms); });
+    return txs.run(
+        [&](mt::Transaction& tx) -> std::size_t
+        { return reap_expired(tx, std::move(namespace_name), std::move(channel_name), now_ms); }
+    );
 }
 
 std::size_t Queue::reap_expired(
@@ -275,10 +473,19 @@ std::size_t Queue::reap_expired(
     std::int64_t now_ms
 ) const
 {
+    return reap_expired(tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), now_ms);
+}
+
+std::size_t Queue::reap_expired(
+    mt::Transaction& tx,
+    std::string namespace_name,
+    std::string channel_name,
+    std::int64_t now_ms
+) const
+{
     auto messages = queue_table(*database_);
     auto claimed = messages.query(
-        tx,
-        mt::QuerySpec::where_json_eq("$.status", mt::Json(status_to_string(MessageStatus::Claimed)))
+        tx, scoped_status_query(namespace_name, channel_name, MessageStatus::Claimed)
     );
 
     std::size_t reaped = 0;
@@ -302,8 +509,17 @@ std::size_t Queue::reap_expired(
 
 std::optional<QueuedMessage> Queue::get(const std::string& id) const
 {
+    return get(std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), id);
+}
+
+std::optional<QueuedMessage> Queue::get(
+    const std::string& namespace_name,
+    const std::string& channel_name,
+    const std::string& id
+) const
+{
     auto messages = queue_table(*database_);
-    auto row = messages.get(id);
+    auto row = messages.get(message_key(namespace_name, channel_name, id));
     if (!row)
     {
         return std::nullopt;
@@ -317,14 +533,75 @@ std::optional<QueuedMessage> Queue::get(
     const std::string& id
 ) const
 {
+    return get(tx, std::string(DEFAULT_NAMESPACE), std::string(DEFAULT_CHANNEL), id);
+}
+
+std::optional<QueuedMessage> Queue::get(
+    mt::Transaction& tx,
+    const std::string& namespace_name,
+    const std::string& channel_name,
+    const std::string& id
+) const
+{
     auto messages = queue_table(*database_);
-    auto row = messages.get(tx, id);
+    auto row = messages.get(tx, message_key(namespace_name, channel_name, id));
     if (!row)
     {
         return std::nullopt;
     }
 
     return to_public_message(*row);
+}
+
+std::vector<std::string> Queue::list_namespaces() const
+{
+    auto messages = queue_table(*database_);
+    std::set<std::string> namespaces;
+    for (const auto& row : messages.list())
+    {
+        namespaces.insert(row.namespaceName);
+    }
+
+    return {namespaces.begin(), namespaces.end()};
+}
+
+std::vector<std::string> Queue::list_namespaces(mt::Transaction& tx) const
+{
+    auto messages = queue_table(*database_);
+    std::set<std::string> namespaces;
+    for (const auto& row : messages.list(tx))
+    {
+        namespaces.insert(row.namespaceName);
+    }
+
+    return {namespaces.begin(), namespaces.end()};
+}
+
+std::vector<std::string> Queue::list_channels(const std::string& namespace_name) const
+{
+    auto messages = queue_table(*database_);
+    std::set<std::string> channels;
+    for (const auto& row : messages.query(namespace_query(namespace_name)))
+    {
+        channels.insert(row.channelName);
+    }
+
+    return {channels.begin(), channels.end()};
+}
+
+std::vector<std::string> Queue::list_channels(
+    mt::Transaction& tx,
+    const std::string& namespace_name
+) const
+{
+    auto messages = queue_table(*database_);
+    std::set<std::string> channels;
+    for (const auto& row : messages.query(tx, namespace_query(namespace_name)))
+    {
+        channels.insert(row.channelName);
+    }
+
+    return {channels.begin(), channels.end()};
 }
 
 } // namespace qu

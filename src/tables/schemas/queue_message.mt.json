@@ -2,9 +2,11 @@
   "namespace": "qu::tables",
   "table_name": "queue_messages",
   "class_name": "QueueMessageRow",
-  "key": "id",
-  "schema_version": 1,
+  "key": {"fields": ["namespaceName", "channelName", "id"], "separator": "\u001f"},
+  "schema_version": 2,
   "fields": [
+    {"name": "namespaceName", "type": "string", "required": true},
+    {"name": "channelName", "type": "string", "required": true},
     {"name": "id", "type": "string", "required": true},
     {"name": "status", "type": "string", "required": true},
     {"name": "payload", "type": "json", "default": {}},
@@ -16,6 +18,8 @@
     {"name": "attempt", "type": "int64", "default": 0}
   ],
   "indexes": [
+    {"name": "idx_queue_message_namespace", "path": "$.namespaceName"},
+    {"name": "idx_queue_message_channel", "path": "$.channelName"},
     {"name": "idx_queue_message_status", "path": "$.status"}
   ]
 }

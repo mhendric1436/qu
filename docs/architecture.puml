@@ -10,6 +10,7 @@ actor "Application" as app
 package "qu" {
     component "qu::Queue\ninclude/qu/queue.hpp" as queue
     component "Queue operations\nsrc/queue.cpp" as ops
+    component "Namespace + channel scope" as scope
     component "QueueMessageRowMapping\nsrc/tables/generated" as mapping
     artifact "queue_message.mt.json\nschema metadata" as schema
 }
@@ -43,6 +44,7 @@ app --> queue : enqueue / claim / ack / fail / reap / get
 app --> orchestrator : workflow updates
 
 queue --> ops
+ops --> scope : namespace / channel / id
 ops --> txs : convenience overloads
 txs --> tx : opens and commits
 app --> tx : caller-owned transaction
@@ -68,6 +70,9 @@ note bottom of table
 Message lifecycle:
 pending -> claimed -> processed
 claimed -> pending on fail or lease reap
+
+Message identity:
+namespace + channel + message id
 end note
 
 @enduml

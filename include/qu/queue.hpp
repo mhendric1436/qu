@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace qu
 {
@@ -26,6 +27,8 @@ struct QueueConfig
 
 struct QueuedMessage
 {
+    std::string namespace_name;
+    std::string channel_name;
     std::string id;
     MessageStatus status = MessageStatus::Pending;
     mt::Json payload = mt::Json::object({});
@@ -39,6 +42,8 @@ struct QueuedMessage
 
 struct ClaimedMessage
 {
+    std::string namespace_name;
+    std::string channel_name;
     std::string id;
     mt::Json payload = mt::Json::object({});
     std::string worker_id;
@@ -79,7 +84,24 @@ class Queue
     ) const;
 
     void enqueue(
+        std::string namespace_name,
+        std::string channel_name,
+        std::string id,
+        mt::Json payload,
+        std::int64_t now_ms
+    ) const;
+
+    void enqueue(
         mt::Transaction& tx,
+        std::string id,
+        mt::Json payload,
+        std::int64_t now_ms
+    ) const;
+
+    void enqueue(
+        mt::Transaction& tx,
+        std::string namespace_name,
+        std::string channel_name,
         std::string id,
         mt::Json payload,
         std::int64_t now_ms
@@ -91,7 +113,22 @@ class Queue
     ) const;
 
     std::optional<ClaimedMessage> claim_next(
+        std::string namespace_name,
+        std::string channel_name,
+        std::string worker_id,
+        std::int64_t now_ms
+    ) const;
+
+    std::optional<ClaimedMessage> claim_next(
         mt::Transaction& tx,
+        std::string worker_id,
+        std::int64_t now_ms
+    ) const;
+
+    std::optional<ClaimedMessage> claim_next(
+        mt::Transaction& tx,
+        std::string namespace_name,
+        std::string channel_name,
         std::string worker_id,
         std::int64_t now_ms
     ) const;
@@ -102,7 +139,22 @@ class Queue
         std::int64_t now_ms) const;
 
     void
+    ack(std::string namespace_name,
+        std::string channel_name,
+        std::string id,
+        std::string worker_id,
+        std::int64_t now_ms) const;
+
+    void
     ack(mt::Transaction& tx,
+        std::string id,
+        std::string worker_id,
+        std::int64_t now_ms) const;
+
+    void
+    ack(mt::Transaction& tx,
+        std::string namespace_name,
+        std::string channel_name,
         std::string id,
         std::string worker_id,
         std::int64_t now_ms) const;
@@ -113,7 +165,22 @@ class Queue
     ) const;
 
     void fail(
+        std::string namespace_name,
+        std::string channel_name,
+        std::string id,
+        std::string worker_id
+    ) const;
+
+    void fail(
         mt::Transaction& tx,
+        std::string id,
+        std::string worker_id
+    ) const;
+
+    void fail(
+        mt::Transaction& tx,
+        std::string namespace_name,
+        std::string channel_name,
         std::string id,
         std::string worker_id
     ) const;
@@ -121,15 +188,50 @@ class Queue
     std::size_t reap_expired(std::int64_t now_ms) const;
 
     std::size_t reap_expired(
+        std::string namespace_name,
+        std::string channel_name,
+        std::int64_t now_ms
+    ) const;
+
+    std::size_t reap_expired(
         mt::Transaction& tx,
+        std::int64_t now_ms
+    ) const;
+
+    std::size_t reap_expired(
+        mt::Transaction& tx,
+        std::string namespace_name,
+        std::string channel_name,
         std::int64_t now_ms
     ) const;
 
     std::optional<QueuedMessage> get(const std::string& id) const;
 
     std::optional<QueuedMessage>
+    get(const std::string& namespace_name,
+        const std::string& channel_name,
+        const std::string& id) const;
+
+    std::optional<QueuedMessage>
     get(mt::Transaction& tx,
         const std::string& id) const;
+
+    std::optional<QueuedMessage>
+    get(mt::Transaction& tx,
+        const std::string& namespace_name,
+        const std::string& channel_name,
+        const std::string& id) const;
+
+    std::vector<std::string> list_namespaces() const;
+
+    std::vector<std::string> list_namespaces(mt::Transaction& tx) const;
+
+    std::vector<std::string> list_channels(const std::string& namespace_name) const;
+
+    std::vector<std::string> list_channels(
+        mt::Transaction& tx,
+        const std::string& namespace_name
+    ) const;
 
   private:
     mt::Database* database_ = nullptr;
