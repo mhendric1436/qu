@@ -1,0 +1,430 @@
+openapi: 3.0.3
+info:
+  title: qu Queue Service API
+  version: 0.1.0
+  description: |
+    REST interface for a qu-backed transactional queue service.
+
+    Messages are scoped by namespace, channel, and message id. Within a
+    namespace/channel pair, messages are claimed in FIFO order using a
+    database-backed monotonic sequence.
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: Namespaces
+  - name: Channels
+  - name: Messages
+  - name: Claims
+  - name: Maintenance
+
+paths:
+  /v1/namespaces:
+    get:
+      tags: [Namespaces]
+      summary: List namespaces
+      operationId: listNamespaces
+      responses:
+        "200":
+          description: Namespaces known to the queue service.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListNamespacesResponse"
+
+  /v1/namespaces/{namespaceName}/channels:
+    get:
+      tags: [Channels]
+      summary: List channels in a namespace
+      operationId: listChannels
+      parameters:
+        - $ref: "#/components/parameters/NamespaceName"
+      responses:
+        "200":
+          description: Channels known in the namespace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListChannelsResponse"
+
+  /v1/namespaces/{namespaceName}/channels/{channelName}/messages:
+    post:
+      tags: [Messages]
+      summary: Enqueue a message
+      operationId: enqueueMessage
+      parameters:
+        - $ref: "#/components/parameters/NamespaceName"
+        - $ref: "#/components/parameters/ChannelName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnqueueMessageRequest"
+      responses:
+        "201":
+          description: Message enqueued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueuedMessage"
+        "409":
+          $ref: "#/components/responses/DuplicateMessage"
+
+  /v1/namespaces/{namespaceName}/channels/{channelName}/messages/{messageId}:
+    get:
+      tags: [Messages]
+      summary: Get a message
+      operationId: getMessage
+      parameters:
+        - $ref: "#/components/parameters/NamespaceName"
+        - $ref: "#/components/parameters/ChannelName"
+        - $ref: "#/components/parameters/MessageId"
+      responses:
+        "200":
+          description: Message found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueuedMessage"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/namespaces/{namespaceName}/channels/{channelName}/claims:
+    post:
+      tags: [Claims]
+      summary: Claim the next pending message
+      description: |
+        Claims the next pending message in FIFO sequence order for the
+        namespace/channel pair. Returns 204 when no pending message is available.
+      operationId: claimNextMessage
+      parameters:
+        - $ref: "#/components/parameters/NamespaceName"
+        - $ref: "#/components/parameters/ChannelName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimNextRequest"
+      responses:
+        "200":
+          description: Message claimed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimedMessage"
+        "204":
+          description: No pending message is available.
+
+  /v1/namespaces/{namespaceName}/channels/{channelName}/messages/{messageId}/ack:
+    post:
+      tags: [Claims]
+      summary: Acknowledge a claimed message
+      operationId: ackMessage
+      parameters:
+        - $ref: "#/components/parameters/NamespaceName"
+        - $ref: "#/components/parameters/ChannelName"
+        - $ref: "#/components/parameters/MessageId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerRequest"
+      responses:
+        "204":
+          description: Message acknowledged.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/InvalidMessageState"
+
+  /v1/namespaces/{namespaceName}/channels/{channelName}/messages/{messageId}/fail:
+    post:
+      tags: [Claims]
+      summary: Return a claimed message to pending
+      operationId: failMessage
+      parameters:
+        - $ref: "#/components/parameters/NamespaceName"
+        - $ref: "#/components/parameters/ChannelName"
+        - $ref: "#/components/parameters/MessageId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumerRequest"
+      responses:
+        "204":
+          description: Message returned to pending.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/InvalidMessageState"
+
+  /v1/namespaces/{namespaceName}/channels/{channelName}/reap-expired:
+    post:
+      tags: [Maintenance]
+      summary: Reap expired claims
+      operationId: reapExpiredClaims
+      parameters:
+        - $ref: "#/components/parameters/NamespaceName"
+        - $ref: "#/components/parameters/ChannelName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReapExpiredRequest"
+      responses:
+        "200":
+          description: Expired claims were reaped.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReapExpiredResponse"
+
+components:
+  parameters:
+    NamespaceName:
+      name: namespaceName
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+      example: workflow
+    ChannelName:
+      name: channelName
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+      example: email
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+      example: message:1
+
+  responses:
+    DuplicateMessage:
+      description: Message id already exists in the namespace/channel.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InvalidMessageState:
+      description: Message is not in the required state or is claimed by another consumer.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Message was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    MessageStatus:
+      type: string
+      enum: [pending, claimed, processed]
+
+    JsonValue:
+      description: Arbitrary JSON payload.
+      nullable: true
+
+    EnqueueMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [id, payload, nowMs]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          example: message:1
+        payload:
+          $ref: "#/components/schemas/JsonValue"
+        nowMs:
+          type: integer
+          format: int64
+          description: Caller-supplied current time in Unix epoch milliseconds.
+          example: 1710000000000
+
+    ClaimNextRequest:
+      type: object
+      additionalProperties: false
+      required: [consumerId, nowMs]
+      properties:
+        consumerId:
+          type: string
+          minLength: 1
+          example: consumer:1
+        nowMs:
+          type: integer
+          format: int64
+          description: Caller-supplied current time in Unix epoch milliseconds.
+          example: 1710000000100
+
+    ConsumerRequest:
+      type: object
+      additionalProperties: false
+      required: [consumerId, nowMs]
+      properties:
+        consumerId:
+          type: string
+          minLength: 1
+          example: consumer:1
+        nowMs:
+          type: integer
+          format: int64
+          description: Caller-supplied current time in Unix epoch milliseconds.
+          example: 1710000000250
+
+    ReapExpiredRequest:
+      type: object
+      additionalProperties: false
+      required: [nowMs]
+      properties:
+        nowMs:
+          type: integer
+          format: int64
+          description: Caller-supplied current time in Unix epoch milliseconds.
+          example: 1710000030100
+
+    QueuedMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - namespaceName
+        - channelName
+        - id
+        - status
+        - payload
+        - sequence
+        - createdAtMs
+        - attempt
+      properties:
+        namespaceName:
+          type: string
+        channelName:
+          type: string
+        id:
+          type: string
+        status:
+          $ref: "#/components/schemas/MessageStatus"
+        payload:
+          $ref: "#/components/schemas/JsonValue"
+        consumerId:
+          type: string
+          nullable: true
+        sequence:
+          type: integer
+          format: int64
+          minimum: 1
+        createdAtMs:
+          type: integer
+          format: int64
+        claimedAtMs:
+          type: integer
+          format: int64
+          nullable: true
+        claimedUntilMs:
+          type: integer
+          format: int64
+          nullable: true
+        processedAtMs:
+          type: integer
+          format: int64
+          nullable: true
+        attempt:
+          type: integer
+          format: int64
+          minimum: 0
+
+    ClaimedMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - namespaceName
+        - channelName
+        - id
+        - payload
+        - consumerId
+        - sequence
+        - attempt
+        - claimedUntilMs
+      properties:
+        namespaceName:
+          type: string
+        channelName:
+          type: string
+        id:
+          type: string
+        payload:
+          $ref: "#/components/schemas/JsonValue"
+        consumerId:
+          type: string
+        sequence:
+          type: integer
+          format: int64
+          minimum: 1
+        attempt:
+          type: integer
+          format: int64
+          minimum: 1
+        claimedUntilMs:
+          type: integer
+          format: int64
+
+    ListNamespacesResponse:
+      type: object
+      additionalProperties: false
+      required: [namespaces]
+      properties:
+        namespaces:
+          type: array
+          items:
+            type: string
+
+    ListChannelsResponse:
+      type: object
+      additionalProperties: false
+      required: [namespaceName, channels]
+      properties:
+        namespaceName:
+          type: string
+        channels:
+          type: array
+          items:
+            type: string
+
+    ReapExpiredResponse:
+      type: object
+      additionalProperties: false
+      required: [reapedCount]
+      properties:
+        reapedCount:
+          type: integer
+          format: int64
+          minimum: 0
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: invalid_message_state
+        message:
+          type: string
+          example: message is not claimed by consumer
