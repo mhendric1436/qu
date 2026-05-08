@@ -1,0 +1,77 @@
+@startuml
+title qu transactional queue architecture
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+actor "Application" as app
+actor "Worker" as worker
+
+package "qu" {
+    component "qu::Queue\ninclude/qu/queue.hpp" as queue
+    component "Queue operations\nsrc/queue.cpp" as ops
+    component "QueueMessageRowMapping\nsrc/tables/generated" as mapping
+    artifact "queue_message.mt.json\nschema metadata" as schema
+}
+
+package "wf" {
+    component "wf::WorkflowOrchestrator" as orchestrator
+    component "Workflow tables" as workflowTables
+}
+
+package "mt" {
+    component "mt::Database" as database
+    component "mt::TransactionProvider" as txs
+    component "mt::Transaction" as tx
+    component "mt::TableProvider" as tables
+    component "mt::Table<QueueMessageRow>" as table
+    interface "mt::IDatabaseBackend" as backend
+}
+
+package "mt backends" {
+    component "MemoryBackend\nprocess-local" as memory
+    component "SqliteBackend\nlocal durable file" as sqlite
+    component "PostgresBackend\nremote durable DB" as postgres
+}
+
+database --> backend
+memory ..|> backend
+sqlite ..|> backend
+postgres ..|> backend
+
+app --> queue : enqueue / get
+worker --> queue : claim / ack / fail / reap
+app --> orchestrator : workflow updates
+worker --> orchestrator : step completion
+
+queue --> ops
+ops --> txs : convenience overloads
+txs --> tx : opens and commits
+app --> tx : caller-owned transaction
+worker --> tx : caller-owned transaction
+queue --> tx : transaction overloads
+orchestrator --> tx : transaction overloads
+
+ops --> tables
+tables --> table
+table --> mapping
+mapping --> schema
+table --> tx : staged reads and writes
+orchestrator --> workflowTables
+workflowTables --> tx : staged reads and writes
+
+note right of tx
+Queue operations can join the same
+mt::Transaction used by wf or other
+application tables, so all changes
+commit or abort together.
+end note
+
+note bottom of table
+Message lifecycle:
+pending -> claimed -> processed
+claimed -> pending on fail or lease reap
+end note
+
+@enduml

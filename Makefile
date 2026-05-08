@@ -6,10 +6,12 @@ PYTHON ?= python3
 CPPFLAGS := -Iinclude -Isrc -Ithird_party -I$(MT_INCLUDE)
 
 FORMAT := clang-format
+PLANTUML ?= plantuml
 
 BUILD_DIR := build
 OBJ_DIR := $(BUILD_DIR)/obj
 BIN_DIR := $(BUILD_DIR)/bin
+DOCS_DIR := docs
 
 LIB_NAME := libqu.a
 LIB := $(BUILD_DIR)/$(LIB_NAME)
@@ -22,6 +24,8 @@ PRIVATE_HEADER_FILES := $(shell find src/tables -name '*.hpp' | sort)
 TABLE_SCHEMA_FILES := $(shell find src/tables/schemas -name '*.mt.json' | sort)
 GENERATED_TABLE_HEADERS := src/tables/generated/queue_message_row.hpp
 CODEGEN_CHECK_DIR := $(BUILD_DIR)/codegen-check
+PUML_FILES := $(shell find $(DOCS_DIR) -name '*.puml' 2>/dev/null | sort)
+DOC_PNG_FILES := $(PUML_FILES:.puml=.png)
 
 ifneq ($(filter 1 true yes,$(FORCE_CODEGEN) $(FORCE)),)
 .PHONY: $(GENERATED_TABLE_HEADERS)
@@ -35,7 +39,7 @@ CATCH_OBJ := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(CATCH_SRC))
 
 FORMAT_FILES := $(HEADER_FILES) $(PRIVATE_HEADER_FILES) $(SRC) $(TEST_SRC)
 
-.PHONY: all build test codegen codegen-force codegen-check format format-check clean help
+.PHONY: all build test codegen codegen-force codegen-check docs-png format format-check clean clean-docs help
 
 all: test
 
@@ -51,6 +55,11 @@ codegen-check:
 	$(PYTHON) $(MT_CODEGEN) src/tables/schemas/queue_message.mt.json -o $(CODEGEN_CHECK_DIR)/queue_message_row.hpp
 	$(FORMAT) -i $(CODEGEN_CHECK_DIR)/queue_message_row.hpp
 	diff -u src/tables/generated/queue_message_row.hpp $(CODEGEN_CHECK_DIR)/queue_message_row.hpp
+
+docs-png: $(DOC_PNG_FILES)
+
+$(DOCS_DIR)/%.png: $(DOCS_DIR)/%.puml
+	$(PLANTUML) -tpng $<
 
 src/tables/generated/queue_message_row.hpp: src/tables/schemas/queue_message.mt.json
 	$(PYTHON) $(MT_CODEGEN) $< -o $@
@@ -81,6 +90,9 @@ format-check:
 clean:
 	rm -rf $(BUILD_DIR)
 
+clean-docs:
+	rm -f $(DOC_PNG_FILES)
+
 help:
 	@echo "Targets:"
 	@echo "  make              Build and run tests"
@@ -89,9 +101,11 @@ help:
 	@echo "  make codegen      Generate private mt row and mapping headers"
 	@echo "  make codegen-force Force-regenerate private mt row and mapping headers"
 	@echo "  make codegen-check Verify generated mt row headers are current"
+	@echo "  make docs-png     Generate PNG diagrams from docs/*.puml"
 	@echo "  make format       Format source and header files with clang-format"
 	@echo "  make format-check Check formatting without modifying files"
 	@echo "  make clean        Remove build outputs"
+	@echo "  make clean-docs   Remove generated docs/*.png diagrams"
 
 DEP_FILES := $(OBJ:.o=.d) $(TEST_OBJ:.o=.d) $(CATCH_OBJ:.o=.d)
 -include $(DEP_FILES)
