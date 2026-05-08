@@ -3,6 +3,7 @@
 #include "mt/query.hpp"
 #include "mt/table.hpp"
 #include "mt/transaction.hpp"
+#include "tables/generated/queue_channel_counter_row.hpp"
 #include "tables/generated/queue_message_row.hpp"
 
 #include <algorithm>
@@ -25,6 +26,8 @@ constexpr std::string_view DEFAULT_NAMESPACE = "default";
 constexpr std::string_view DEFAULT_CHANNEL = "default";
 
 using QueueMessageTable = mt::Table<tables::QueueMessageRow, tables::QueueMessageRowMapping>;
+using QueueChannelCounterTable =
+    mt::Table<tables::QueueChannelCounterRow, tables::QueueChannelCounterRowMapping>;
 
 std::string status_to_string(MessageStatus status)
 {
@@ -68,6 +71,7 @@ QueuedMessage to_public_message(const tables::QueueMessageRow& row)
         .status = status_from_string(row.status),
         .payload = row.payload,
         .consumer_id = row.consumerId,
+        .sequence = row.sequence,
         .created_at_ms = row.createdAtMs,
         .claimed_at_ms = row.claimedAtMs,
         .claimed_until_ms = row.claimedUntilMs,
@@ -89,6 +93,7 @@ ClaimedMessage to_claimed_message(const tables::QueueMessageRow& row)
         .id = row.id,
         .payload = row.payload,
         .consumer_id = *row.consumerId,
+        .sequence = row.sequence,
         .attempt = row.attempt,
         .claimed_until_ms = *row.claimedUntilMs
     };
@@ -98,6 +103,12 @@ QueueMessageTable queue_table(mt::Database& database)
 {
     mt::TableProvider tables{database};
     return tables.table<tables::QueueMessageRow, tables::QueueMessageRowMapping>();
+}
+
+QueueChannelCounterTable queue_channel_counter_table(mt::Database& database)
+{
+    mt::TableProvider tables{database};
+    return tables.table<tables::QueueChannelCounterRow, tables::QueueChannelCounterRowMapping>();
 }
 
 std::string message_key(
@@ -112,9 +123,42 @@ std::string message_key(
             .channelName = channel_name,
             .id = id,
             .status = std::string(STATUS_PENDING),
+            .sequence = 0,
             .createdAtMs = 0
         }
     );
+}
+
+std::string counter_key(
+    const std::string& namespace_name,
+    const std::string& channel_name
+)
+{
+    return tables::QueueChannelCounterRowMapping::key(
+        tables::QueueChannelCounterRow{
+            .namespaceName = namespace_name, .channelName = channel_name, .nextSequence = 0
+        }
+    );
+}
+
+std::int64_t allocate_sequence(
+    mt::Transaction& tx,
+    const QueueChannelCounterTable& counters,
+    const std::string& namespace_name,
+    const std::string& channel_name
+)
+{
+    auto key = counter_key(namespace_name, channel_name);
+    auto counter = counters.get(tx, key).value_or(
+        tables::QueueChannelCounterRow{
+            .namespaceName = namespace_name, .channelName = channel_name, .nextSequence = 1
+        }
+    );
+
+    auto sequence = counter.nextSequence;
+    counter.nextSequence += 1;
+    counters.put(tx, counter);
+    return sequence;
 }
 
 mt::QuerySpec scoped_status_query(
@@ -180,6 +224,7 @@ Queue::Queue(
       config_(config)
 {
     (void)queue_table(*database_);
+    (void)queue_channel_counter_table(*database_);
 }
 
 void Queue::enqueue(
@@ -238,12 +283,15 @@ void Queue::enqueue(
 ) const
 {
     auto messages = queue_table(*database_);
+    auto counters = queue_channel_counter_table(*database_);
     auto key = message_key(namespace_name, channel_name, id);
 
     if (messages.get(tx, key))
     {
         throw DuplicateMessage(id);
     }
+
+    auto sequence = allocate_sequence(tx, counters, namespace_name, channel_name);
 
     messages.put(
         tx, tables::QueueMessageRow{
@@ -252,6 +300,7 @@ void Queue::enqueue(
                 .id = std::move(id),
                 .status = status_to_string(MessageStatus::Pending),
                 .payload = std::move(payload),
+                .sequence = sequence,
                 .createdAtMs = now_ms
             }
     );
@@ -319,9 +368,9 @@ std::optional<ClaimedMessage> Queue::claim_next(
         pending.begin(), pending.end(),
         [](const tables::QueueMessageRow& lhs, const tables::QueueMessageRow& rhs)
         {
-            if (lhs.createdAtMs != rhs.createdAtMs)
+            if (lhs.sequence != rhs.sequence)
             {
-                return lhs.createdAtMs < rhs.createdAtMs;
+                return lhs.sequence < rhs.sequence;
             }
             return lhs.id < rhs.id;
         }

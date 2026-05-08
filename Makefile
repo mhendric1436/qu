@@ -22,7 +22,9 @@ TEST_SRC := $(shell find tests -name '*.cpp' | sort)
 HEADER_FILES := $(shell find include -name '*.hpp' | sort)
 PRIVATE_HEADER_FILES := $(shell find src/tables -name '*.hpp' | sort)
 TABLE_SCHEMA_FILES := $(shell find src/tables/schemas -name '*.mt.json' | sort)
-GENERATED_TABLE_HEADERS := src/tables/generated/queue_message_row.hpp
+GENERATED_TABLE_HEADERS := \
+	src/tables/generated/queue_channel_counter_row.hpp \
+	src/tables/generated/queue_message_row.hpp
 CODEGEN_CHECK_DIR := $(BUILD_DIR)/codegen-check
 PUML_FILES := $(shell find $(DOCS_DIR) -name '*.puml' 2>/dev/null | sort)
 DOC_PNG_FILES := $(PUML_FILES:.puml=.png)
@@ -52,6 +54,9 @@ codegen-force:
 
 codegen-check:
 	@mkdir -p $(CODEGEN_CHECK_DIR)
+	$(PYTHON) $(MT_CODEGEN) src/tables/schemas/queue_channel_counter.mt.json -o $(CODEGEN_CHECK_DIR)/queue_channel_counter_row.hpp
+	$(FORMAT) -i $(CODEGEN_CHECK_DIR)/queue_channel_counter_row.hpp
+	diff -u src/tables/generated/queue_channel_counter_row.hpp $(CODEGEN_CHECK_DIR)/queue_channel_counter_row.hpp
 	$(PYTHON) $(MT_CODEGEN) src/tables/schemas/queue_message.mt.json -o $(CODEGEN_CHECK_DIR)/queue_message_row.hpp
 	$(FORMAT) -i $(CODEGEN_CHECK_DIR)/queue_message_row.hpp
 	diff -u src/tables/generated/queue_message_row.hpp $(CODEGEN_CHECK_DIR)/queue_message_row.hpp
@@ -60,6 +65,10 @@ docs-png: $(DOC_PNG_FILES)
 
 $(DOCS_DIR)/%.png: $(DOCS_DIR)/%.puml
 	$(PLANTUML) -tpng $<
+
+src/tables/generated/queue_channel_counter_row.hpp: src/tables/schemas/queue_channel_counter.mt.json
+	$(PYTHON) $(MT_CODEGEN) $< -o $@
+	$(FORMAT) -i $@
 
 src/tables/generated/queue_message_row.hpp: src/tables/schemas/queue_message.mt.json
 	$(PYTHON) $(MT_CODEGEN) $< -o $@

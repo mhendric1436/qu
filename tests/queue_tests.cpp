@@ -55,6 +55,7 @@ TEST_CASE("claim transitions one pending message to claimed")
     REQUIRE(claimed.has_value());
     CHECK(claimed->id == "msg-1");
     CHECK(claimed->consumer_id == "consumer-1");
+    CHECK(claimed->sequence == 1);
     CHECK(claimed->claimed_until_ms == 1200);
     CHECK(claimed->attempt == 1);
 
@@ -63,6 +64,7 @@ TEST_CASE("claim transitions one pending message to claimed")
     CHECK(stored->status == qu::MessageStatus::Claimed);
     REQUIRE(stored->consumer_id.has_value());
     CHECK(*stored->consumer_id == "consumer-1");
+    CHECK(stored->sequence == 1);
 }
 
 TEST_CASE("two consumers do not claim the same pending message")
@@ -81,9 +83,9 @@ TEST_CASE("claim_next preserves enqueue order within a namespace and channel")
 {
     TestContext ctx;
 
-    ctx.queue.enqueue("orders", "created", "msg-c", mt::Json::object({}), 1000);
-    ctx.queue.enqueue("orders", "created", "msg-a", mt::Json::object({}), 1001);
-    ctx.queue.enqueue("orders", "created", "msg-b", mt::Json::object({}), 1002);
+    ctx.queue.enqueue("orders", "created", "msg-c", mt::Json::object({}), 3000);
+    ctx.queue.enqueue("orders", "created", "msg-a", mt::Json::object({}), 1000);
+    ctx.queue.enqueue("orders", "created", "msg-b", mt::Json::object({}), 2000);
 
     auto first = ctx.queue.claim_next("orders", "created", "consumer-1", 1100);
     auto second = ctx.queue.claim_next("orders", "created", "consumer-1", 1101);
@@ -95,6 +97,33 @@ TEST_CASE("claim_next preserves enqueue order within a namespace and channel")
     CHECK(first->id == "msg-c");
     CHECK(second->id == "msg-a");
     CHECK(third->id == "msg-b");
+    CHECK(first->sequence == 1);
+    CHECK(second->sequence == 2);
+    CHECK(third->sequence == 3);
+}
+
+TEST_CASE("message sequences are scoped by namespace and channel")
+{
+    TestContext ctx;
+
+    ctx.queue.enqueue("team-a", "notifications", "msg-1", mt::Json::object({}), 1000);
+    ctx.queue.enqueue("team-a", "billing", "msg-2", mt::Json::object({}), 1000);
+    ctx.queue.enqueue("team-b", "notifications", "msg-3", mt::Json::object({}), 1000);
+    ctx.queue.enqueue("team-a", "notifications", "msg-4", mt::Json::object({}), 1000);
+
+    auto team_a_notifications_first = ctx.queue.get("team-a", "notifications", "msg-1");
+    auto team_a_billing_first = ctx.queue.get("team-a", "billing", "msg-2");
+    auto team_b_notifications_first = ctx.queue.get("team-b", "notifications", "msg-3");
+    auto team_a_notifications_second = ctx.queue.get("team-a", "notifications", "msg-4");
+
+    REQUIRE(team_a_notifications_first.has_value());
+    REQUIRE(team_a_billing_first.has_value());
+    REQUIRE(team_b_notifications_first.has_value());
+    REQUIRE(team_a_notifications_second.has_value());
+    CHECK(team_a_notifications_first->sequence == 1);
+    CHECK(team_a_billing_first->sequence == 1);
+    CHECK(team_b_notifications_first->sequence == 1);
+    CHECK(team_a_notifications_second->sequence == 2);
 }
 
 TEST_CASE("ack marks a claimed message as processed")

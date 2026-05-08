@@ -11,6 +11,7 @@
     {"name": "status", "type": "string", "required": true},
     {"name": "payload", "type": "json", "default": {}},
     {"name": "consumerId", "type": "optional", "value_type": "string"},
+    {"name": "sequence", "type": "int64", "required": true},
     {"name": "createdAtMs", "type": "int64", "required": true},
     {"name": "claimedAtMs", "type": "optional", "value_type": "int64"},
     {"name": "claimedUntilMs", "type": "optional", "value_type": "int64"},

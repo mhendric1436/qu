@@ -19,6 +19,7 @@ struct QueueMessageRow
     std::string status;
     mt::Json payload = mt::Json::object({});
     std::optional<std::string> consumerId;
+    std::int64_t sequence;
     std::int64_t createdAtMs;
     std::optional<std::int64_t> claimedAtMs;
     std::optional<std::int64_t> claimedUntilMs;
@@ -42,6 +43,7 @@ struct QueueMessageRowMapping
     static constexpr std::string_view field_status = "status";
     static constexpr std::string_view field_payload = "payload";
     static constexpr std::string_view field_consumerId = "consumerId";
+    static constexpr std::string_view field_sequence = "sequence";
     static constexpr std::string_view field_createdAtMs = "createdAtMs";
     static constexpr std::string_view field_claimedAtMs = "claimedAtMs";
     static constexpr std::string_view field_claimedUntilMs = "claimedUntilMs";
@@ -73,6 +75,7 @@ struct QueueMessageRowMapping
                 .with_default(mt::Json::object({})),
             mt::FieldSpec::optional(std::string(field_consumerId), mt::FieldType::String)
                 .mark_required(true),
+            mt::FieldSpec::int64(std::string(field_sequence)).mark_required(true),
             mt::FieldSpec::int64(std::string(field_createdAtMs)).mark_required(true),
             mt::FieldSpec::optional(std::string(field_claimedAtMs), mt::FieldType::Int64)
                 .mark_required(true),
@@ -96,6 +99,7 @@ struct QueueMessageRowMapping
              {std::string(field_payload), row.payload},
              {std::string(field_consumerId),
               row.consumerId ? mt::Json(*row.consumerId) : mt::Json::null()},
+             {std::string(field_sequence), row.sequence},
              {std::string(field_createdAtMs), row.createdAtMs},
              {std::string(field_claimedAtMs),
               row.claimedAtMs ? mt::Json(*row.claimedAtMs) : mt::Json::null()},
@@ -119,6 +123,7 @@ struct QueueMessageRowMapping
                 json[std::string(field_consumerId)].is_null()
                     ? std::nullopt
                     : std::optional<std::string>(json[std::string(field_consumerId)].as_string()),
+            .sequence = json[std::string(field_sequence)].as_int64(),
             .createdAtMs = json[std::string(field_createdAtMs)].as_int64(),
             .claimedAtMs =
                 json[std::string(field_claimedAtMs)].is_null()

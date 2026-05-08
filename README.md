@@ -81,6 +81,7 @@ The current row schema stores:
 - status
 - payload JSON
 - consumer id for claimed messages
+- per-channel enqueue sequence
 - creation, claim, visibility, and processing timestamps
 - attempt count
 
@@ -88,8 +89,10 @@ The physical row key is composed from namespace, channel, and message id. Duplic
 message protection is scoped to that tuple, so two namespaces can safely use the same
 channel and message id.
 
-Within a namespace and channel, pending messages are claimed in enqueue order by
-`createdAtMs`, with message id as a deterministic tie-breaker when timestamps are equal.
+Within a namespace and channel, pending messages are claimed in enqueue order by a
+database-backed monotonically increasing sequence. The sequence is scoped to the
+namespace/channel pair, so ordering is not affected by producer host clock skew.
+Counter rows store the next sequence value for each namespace/channel pair.
 
 The memory backend is process-local and non-durable. It is used here for tests and local
 development. Durable deployments should wire the same queue service to a durable `mt`

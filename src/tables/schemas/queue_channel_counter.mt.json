@@ -1,0 +1,15 @@
+{
+  "namespace": "qu::tables",
+  "table_name": "queue_channel_counters",
+  "class_name": "QueueChannelCounterRow",
+  "key": {"fields": ["namespaceName", "channelName"], "separator": "\u001f"},
+  "schema_version": 1,
+  "fields": [
+    {"name": "namespaceName", "type": "string", "required": true},
+    {"name": "channelName", "type": "string", "required": true},
+    {"name": "nextSequence", "type": "int64", "required": true}
+  ],
+  "indexes": [
+    {"name": "idx_queue_channel_counter_namespace", "path": "$.namespaceName"}
+  ]
+}

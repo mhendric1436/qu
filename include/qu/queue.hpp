@@ -33,6 +33,7 @@ struct QueuedMessage
     MessageStatus status = MessageStatus::Pending;
     mt::Json payload = mt::Json::object({});
     std::optional<std::string> consumer_id;
+    std::int64_t sequence = 0;
     std::int64_t created_at_ms = 0;
     std::optional<std::int64_t> claimed_at_ms;
     std::optional<std::int64_t> claimed_until_ms;
@@ -47,6 +48,7 @@ struct ClaimedMessage
     std::string id;
     mt::Json payload = mt::Json::object({});
     std::string consumer_id;
+    std::int64_t sequence = 0;
     std::int64_t attempt = 0;
     std::int64_t claimed_until_ms = 0;
 };
