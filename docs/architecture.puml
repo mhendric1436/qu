@@ -6,7 +6,6 @@ skinparam shadowing false
 skinparam packageStyle rectangle
 
 actor "Application" as app
-actor "Worker" as worker
 
 package "qu" {
     component "qu::Queue\ninclude/qu/queue.hpp" as queue
@@ -40,16 +39,13 @@ memory ..|> backend
 sqlite ..|> backend
 postgres ..|> backend
 
-app --> queue : enqueue / get
-worker --> queue : claim / ack / fail / reap
+app --> queue : enqueue / claim / ack / fail / reap / get
 app --> orchestrator : workflow updates
-worker --> orchestrator : step completion
 
 queue --> ops
 ops --> txs : convenience overloads
 txs --> tx : opens and commits
 app --> tx : caller-owned transaction
-worker --> tx : caller-owned transaction
 queue --> tx : transaction overloads
 orchestrator --> tx : transaction overloads
 
